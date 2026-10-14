@@ -1,0 +1,81 @@
+[package]
+name = "pulsebar"
+version = "0.1.0"
+description = "macOS menu bar system monitor"
+edition = "2024"
+rust-version = "1.99"
+license = "MIT"
+publish = false
+
+[lib]
+name = "pulsebar_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7.2", features = [] }
+
+[dependencies]
+tauri = { version = "~2.12.3", features = ["tray-icon", "macos-private-api", "image-png"] }
+tauri-plugin-single-instance = "2.5.3"
+tauri-plugin-autostart = "2.7.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+thiserror = "2.0.21"
+log = "0.4.34"
+env_logger = { version = "0.11.11", default-features = false }
+libc = "0.2.190"
+mach2 = "0.7.0"
+if-addrs = "0.15.0"
+objc2 = "0.6.5"
+objc2-foundation = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "NSArray",
+    "NSDictionary",
+    "NSError",
+    "NSObject",
+    "NSString",
+    "NSURL",
+    "NSValue",
+] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "objc2-core-foundation",
+    "NSButton",
+    "NSControl",
+    "NSFont",
+    "NSFontDescriptor",
+    "NSResponder",
+    "NSStatusBarButton",
+    "NSStatusItem",
+    "NSView",
+] }
+objc2-core-foundation = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "CFArray",
+    "CFData",
+    "CFDictionary",
+    "CFNumber",
+    "CFString",
+] }
+objc2-io-kit = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "libc",
+    "pwr_mgt",
+] }
+objc2-system-configuration = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "SCDynamicStore",
+    "SCDynamicStoreKey",
+    "SCNetworkConfiguration",
+    "SCSchemaDefinitions",
+] }
+
+[target.'cfg(target_arch = "aarch64")'.dependencies]
+macmon = { version = "=0.9.0", default-features = false }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
+panic = "unwind"

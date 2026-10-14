@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Check (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-26, macos-26-intel]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout (actions/checkout v7.0.1)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Install pnpm (pnpm/action-setup v6.1.0)
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
+
+      - name: Setup Node 24 (actions/setup-node v7.1.0)
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install Rust targets and components
+        run: |
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          rustup component add clippy rustfmt
+          rustc -vV
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Frontend format
+        run: pnpm format:check
+
+      - name: Frontend lint
+        run: pnpm lint
+
+      - name: Frontend type check
+        run: pnpm check
+
+      - name: Frontend tests
+        run: pnpm test
+
+      - name: Frontend build
+        run: pnpm build
+
+      - name: Rust format
+        working-directory: src-tauri
+        run: cargo fmt --check
+
+      - name: Clippy aarch64
+        working-directory: src-tauri
+        run: cargo clippy --locked --all-targets --target aarch64-apple-darwin -- -D warnings
+
+      - name: Clippy x86_64
+        working-directory: src-tauri
+        run: cargo clippy --locked --all-targets --target x86_64-apple-darwin -- -D warnings
+
+      - name: Rust tests (native target)
+        working-directory: src-tauri
+        run: |
+          host="$(rustc -vV | sed -n 's/^host: //p')"
+          cargo test --locked --target "$host"
+
+      - name: Rust tests compile (cross target)
+        working-directory: src-tauri
+        run: |
+          host="$(rustc -vV | sed -n 's/^host: //p')"
+          if [ "$host" = "aarch64-apple-darwin" ]; then other=x86_64-apple-darwin; else other=aarch64-apple-darwin; fi
+          cargo test --locked --no-run --target "$other"

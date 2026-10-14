@@ -1,0 +1,104 @@
+{
+  "staticInfo": {
+    "platform": "appleSilicon",
+    "arch": "arm64",
+    "translated": false,
+    "cpuBrand": "Apple M3 Pro",
+    "physicalCores": 12,
+    "logicalCores": 12,
+    "clusters": [
+      { "label": "E", "name": "Efficiency", "coreCount": 6, "maxMhz": 2748 },
+      { "label": "P", "name": "Performance", "coreCount": 6, "maxMhz": null }
+    ],
+    "topologyAssumed": false,
+    "nominalMhz": null,
+    "maxMhz": 4056,
+    "totalMemoryBytes": 38654705664,
+    "osVersion": "15.6.1",
+    "modelIdentifier": "Mac15,6",
+    "bootTimeUnix": 1760400000,
+    "powerSourceKind": "ioreport",
+    "freqSourceKind": null
+  },
+  "snapshot": {
+    "seq": 42,
+    "timestampMs": 1760400123456,
+    "cpu": {
+      "totalUsagePct": 23.5,
+      "frequency": {
+        "state": "ok",
+        "source": "ioReport",
+        "avgMhz": 2400,
+        "minMhz": 1020,
+        "maxMhz": 3504,
+        "perCoreAvailable": true,
+        "speedLimitPct": 100
+      },
+      "clusters": [
+        { "label": "E", "freqMhz": 1020, "usagePct": 12.25 },
+        { "label": "P", "freqMhz": null, "usagePct": 34.75 }
+      ],
+      "cores": [
+        { "id": 0, "cluster": "E", "usagePct": 12.5, "freqMhz": 1020, "activeRatio": 0.25 },
+        { "id": 6, "cluster": "P", "usagePct": 50.5, "freqMhz": null, "activeRatio": null }
+      ]
+    },
+    "power": {
+      "state": "ok",
+      "cpuWatts": 8.5,
+      "smoothedCpuWatts": 8.25,
+      "source": "ioreport",
+      "scope": "cpu"
+    },
+    "memory": {
+      "usedBytes": 23773642752,
+      "totalBytes": 38654705664,
+      "usedPct": 61.5,
+      "appBytes": 15032385536,
+      "wiredBytes": 4294967296,
+      "compressedBytes": 4446289920,
+      "cachedBytes": 8589934592,
+      "swapUsedBytes": 0
+    },
+    "disks": [
+      {
+        "id": "fsid-16777234-26",
+        "name": "Macintosh HD",
+        "mountPoint": "/",
+        "fsType": "apfs",
+        "isBoot": true,
+        "isRemovable": false,
+        "isNetwork": false,
+        "totalBytes": 994662584320,
+        "availableBytes": 500000000000,
+        "availableImportantBytes": null,
+        "usedBytes": 494662584320,
+        "usedPct": 49.75
+      }
+    ],
+    "network": {
+      "wifiInterface": "en0",
+      "wifiIpv4": "192.168.1.23",
+      "wifiIpv6": null,
+      "isWifiConnected": true,
+      "primaryInterface": "en0"
+    },
+    "uptimeSecs": 123456
+  },
+  "powerUnavailable": {
+    "state": "unavailable",
+    "reason": "Máy ảo không cung cấp cảm biến công suất"
+  },
+  "frequencyLoading": {
+    "state": "loading"
+  },
+  "frequencyNominal": {
+    "state": "ok",
+    "source": "nominal",
+    "avgMhz": null,
+    "minMhz": null,
+    "maxMhz": null,
+    "perCoreAvailable": false,
+    "speedLimitPct": 100
+  }
+}
