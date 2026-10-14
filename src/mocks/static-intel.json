@@ -1,0 +1,18 @@
+{
+  "platform": "intel",
+  "arch": "x86_64",
+  "translated": false,
+  "cpuBrand": "Intel(R) Core(TM) i9-9880H CPU @ 2.30GHz",
+  "physicalCores": 8,
+  "logicalCores": 16,
+  "clusters": [{ "label": "CPU", "name": "CPU", "coreCount": 16, "maxMhz": 4800 }],
+  "topologyAssumed": false,
+  "nominalMhz": 2300,
+  "maxMhz": 4800,
+  "totalMemoryBytes": 34359738368,
+  "osVersion": "14.8.1",
+  "modelIdentifier": "MacBookPro16,1",
+  "bootTimeUnix": 1760125680,
+  "powerSourceKind": "smc:PCPT",
+  "freqSourceKind": "nominal"
+}

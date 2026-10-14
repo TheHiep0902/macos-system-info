@@ -112,3 +112,26 @@ export interface Snapshot {
   network: NetworkSample;
   uptimeSecs: number;
 }
+
+export type TitleFormat = 'default' | 'compact';
+
+export type ThemePreference = 'system' | 'light' | 'dark';
+
+export interface Settings {
+  titleFormat: TitleFormat;
+  showTrayIcon: boolean;
+  theme: ThemePreference;
+  reduceEffects: boolean;
+  showNetworkDisks: boolean;
+  memorySaver: boolean;
+  launchAtLogin: boolean;
+}
+
+export type PopoverView = 'overview' | 'cpu-detail' | 'settings';
+
+export type RequestedView = 'overview' | 'settings';
+
+export interface PopoverVisibility {
+  visible: boolean;
+  view: RequestedView | null;
+}

@@ -25,4 +25,24 @@ that platform yet. Updated at the end of each deliverable.
 | Apple Silicon, x86_64 slice via Rosetta | 14 / 15 / 26 / 27 | chưa kiểm chứng | chưa kiểm chứng | chưa kiểm chứng (expected Unavailable) | chưa kiểm chứng (expected Unavailable) | chưa kiểm chứng |
 | Virtual machine (Apple Silicon host)    | any               | chưa kiểm chứng | chưa kiểm chứng | chưa kiểm chứng (expected Unavailable) | chưa kiểm chứng (expected Unavailable) | chưa kiểm chứng |
 
-Popover, disks card, Wi-Fi card and performance budgets are verified in D2.
+Popover, disks card, Wi-Fi card and performance budgets are covered in the D2 table below.
+
+## Continuous integration
+
+| Runner                          | Architecture | Result                                                                                                        |
+| ------------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------- |
+| GitHub Actions `macos-26`       | arm64 (VM)   | verified: run 38560322065 (D1 commit `3cb01a7`) — fmt, clippy both targets, native Rust tests, frontend gates |
+| GitHub Actions `macos-26-intel` | x86_64 (VM)  | verified: same run                                                                                            |
+
+CI runners are virtual machines, so they prove the build and unit tests only; Apple Silicon runtime
+behaviour (macmon power, topology, budgets) stays **chưa kiểm chứng**.
+
+## Verification status (D2)
+
+| Platform                                | macOS             | Popover show / hide                                                     | Disks / Wi-Fi / uptime                               | Settings, autostart, single instance | Budgets                                                               |
+| --------------------------------------- | ----------------- | ----------------------------------------------------------------------- | ---------------------------------------------------- | ------------------------------------ | --------------------------------------------------------------------- |
+| Intel Hackintosh i7-7700HQ (VirtualSMC) | 14.8.9            | verified: second launch, Reopen, blur; on-screen checks chưa kiểm chứng | verified (data path); card on screen chưa kiểm chứng | verified                             | verified (CPU main process; memory as footprint, see verification.md) |
+| Intel Mac (real hardware)               | 14 / 15 / 26      | chưa kiểm chứng                                                         | chưa kiểm chứng                                      | chưa kiểm chứng                      | chưa kiểm chứng                                                       |
+| Intel Mac with T2                       | 14 / 15 / 26      | chưa kiểm chứng                                                         | chưa kiểm chứng                                      | chưa kiểm chứng                      | chưa kiểm chứng                                                       |
+| Apple Silicon M1–M5                     | 14 / 15 / 26 / 27 | chưa kiểm chứng                                                         | chưa kiểm chứng                                      | chưa kiểm chứng                      | chưa kiểm chứng                                                       |
+| Apple Silicon, x86_64 slice via Rosetta | 14 / 15 / 26 / 27 | chưa kiểm chứng                                                         | chưa kiểm chứng                                      | chưa kiểm chứng                      | chưa kiểm chứng                                                       |

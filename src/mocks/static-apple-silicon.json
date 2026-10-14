@@ -1,0 +1,21 @@
+{
+  "platform": "appleSilicon",
+  "arch": "arm64",
+  "translated": false,
+  "cpuBrand": "Apple M3 Pro",
+  "physicalCores": 12,
+  "logicalCores": 12,
+  "clusters": [
+    { "label": "E", "name": "Efficiency", "coreCount": 6, "maxMhz": 2748 },
+    { "label": "P", "name": "Performance", "coreCount": 6, "maxMhz": 4056 }
+  ],
+  "topologyAssumed": false,
+  "nominalMhz": null,
+  "maxMhz": 4056,
+  "totalMemoryBytes": 38654705664,
+  "osVersion": "15.6.1",
+  "modelIdentifier": "Mac15,6",
+  "bootTimeUnix": 1760276544,
+  "powerSourceKind": "ioreport",
+  "freqSourceKind": "ioReport"
+}

@@ -1,0 +1,59 @@
+:root {
+  --font-family-sans: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-size-xs: 11px;
+  --font-size-sm: 12px;
+  --font-size-md: 13px;
+  --font-size-lg: 15px;
+  --font-size-xl: 20px;
+  --font-size-display: 24px;
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --line-height-tight: 1.2;
+  --line-height-normal: 1.4;
+
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 6px;
+  --space-4: 8px;
+  --space-5: 10px;
+  --space-6: 12px;
+  --space-7: 16px;
+  --space-8: 20px;
+
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-pill: 999px;
+
+  --size-hairline: 1px;
+  --border-width: 1px;
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
+  --icon-size-sm: 14px;
+  --icon-size-md: 16px;
+  --control-size: 28px;
+  --progress-height: 6px;
+  --progress-height-sm: 4px;
+  --sparkline-height: 28px;
+  --sparkline-stroke: 1.5px;
+  --status-dot-size: 8px;
+  --switch-width: 30px;
+  --switch-height: 18px;
+  --switch-knob-size: 14px;
+  --radio-size: 14px;
+  --radio-dot-size: 6px;
+  --core-cell-min-width: 84px;
+  --skeleton-line-height: 10px;
+
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --easing-standard: cubic-bezier(0.2, 0, 0, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast: 0ms;
+    --duration-base: 0ms;
+  }
+}

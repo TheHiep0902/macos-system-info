@@ -20,6 +20,7 @@
     "tauri": "tauri"
   },
   "dependencies": {
+    "@lucide/svelte": "^1.56.0",
     "@tauri-apps/api": "~2.12.3"
   },
   "devDependencies": {

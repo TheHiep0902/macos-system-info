@@ -1,0 +1,192 @@
+{
+  "seq": 60,
+  "timestampMs": 1760400123456,
+  "cpu": {
+    "totalUsagePct": 20.27,
+    "frequency": {
+      "state": "ok",
+      "source": "nominal",
+      "avgMhz": null,
+      "minMhz": null,
+      "maxMhz": null,
+      "perCoreAvailable": false,
+      "speedLimitPct": 100
+    },
+    "clusters": [
+      {
+        "label": "CPU",
+        "freqMhz": null,
+        "usagePct": 20.27
+      }
+    ],
+    "cores": [
+      {
+        "id": 0,
+        "cluster": "CPU",
+        "usagePct": 34.5,
+        "freqMhz": null,
+        "activeRatio": null
+      },
+      {
+        "id": 1,
+        "cluster": "CPU",
+        "usagePct": 12.25,
+        "freqMhz": null,
+        "activeRatio": null
+      },
+      {
+        "id": 2,
+        "cluster": "CPU",
+        "usagePct": 28,
+        "freqMhz": null,
+        "activeRatio": null
+      },
+      {
+        "id": 3,
+        "cluster": "CPU",
+        "usagePct": 9.5,
+        "freqMhz": null,
+        "activeRatio": null
+      },
+      {
+        "id": 4,
+        "cluster": "CPU",
+        "usagePct": 41.75,
+        "freqMhz": null,
+        "activeRatio": null
+      },
+      {
+        "id": 5,
+        "cluster": "CPU",
+        "usagePct": 15,
+        "freqMhz": null,
+        "activeRatio": null
+      },
+      {
+        "id": 6,
+        "cluster": "CPU",
+        "usagePct": 22.5,
+        "freqMhz": null,
+        "activeRatio": null
+      },
+      {
+        "id": 7,
+        "cluster": "CPU",
+        "usagePct": 7.25,
+        "freqMhz": null,
+        "activeRatio": null
+      },
+      {
+        "id": 8,
+        "cluster": "CPU",
+        "usagePct": 30,
+        "freqMhz": null,
+        "activeRatio": null
+      },
+      {
+        "id": 9,
+        "cluster": "CPU",
+        "usagePct": 11.5,
+        "freqMhz": null,
+        "activeRatio": null
+      },
+      {
+        "id": 10,
+        "cluster": "CPU",
+        "usagePct": 26.25,
+        "freqMhz": null,
+        "activeRatio": null
+      },
+      {
+        "id": 11,
+        "cluster": "CPU",
+        "usagePct": 8,
+        "freqMhz": null,
+        "activeRatio": null
+      },
+      {
+        "id": 12,
+        "cluster": "CPU",
+        "usagePct": 37.5,
+        "freqMhz": null,
+        "activeRatio": null
+      },
+      {
+        "id": 13,
+        "cluster": "CPU",
+        "usagePct": 14.75,
+        "freqMhz": null,
+        "activeRatio": null
+      },
+      {
+        "id": 14,
+        "cluster": "CPU",
+        "usagePct": 19,
+        "freqMhz": null,
+        "activeRatio": null
+      },
+      {
+        "id": 15,
+        "cluster": "CPU",
+        "usagePct": 6.5,
+        "freqMhz": null,
+        "activeRatio": null
+      }
+    ]
+  },
+  "power": {
+    "state": "ok",
+    "cpuWatts": 14.2,
+    "smoothedCpuWatts": 13.6,
+    "source": "smc:PCPT",
+    "scope": "package"
+  },
+  "memory": {
+    "usedBytes": 27917287424,
+    "totalBytes": 34359738368,
+    "usedPct": 81.25,
+    "appBytes": 17179869184,
+    "wiredBytes": 4831838208,
+    "compressedBytes": 5905580032,
+    "cachedBytes": 4294967296,
+    "swapUsedBytes": 2147483648
+  },
+  "disks": [
+    {
+      "id": "fsid-16777220-17",
+      "name": "Macintosh HD",
+      "mountPoint": "/",
+      "fsType": "apfs",
+      "isBoot": true,
+      "isRemovable": false,
+      "isNetwork": false,
+      "totalBytes": 499963174912,
+      "availableBytes": 41875931136,
+      "availableImportantBytes": null,
+      "usedBytes": 458087243776,
+      "usedPct": 91.62
+    },
+    {
+      "id": "fsid-16777233-25",
+      "name": "Backup",
+      "mountPoint": "/Volumes/Backup",
+      "fsType": "apfs",
+      "isBoot": false,
+      "isRemovable": true,
+      "isNetwork": false,
+      "totalBytes": 1000204886016,
+      "availableBytes": 34359738368,
+      "availableImportantBytes": null,
+      "usedBytes": 965845147648,
+      "usedPct": 96.56
+    }
+  ],
+  "network": {
+    "wifiInterface": "en0",
+    "wifiIpv4": "10.0.0.42",
+    "wifiIpv6": null,
+    "isWifiConnected": true,
+    "primaryInterface": "en0"
+  },
+  "uptimeSecs": 274320
+}

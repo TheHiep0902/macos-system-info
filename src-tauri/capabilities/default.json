@@ -3,5 +3,15 @@
   "identifier": "default",
   "description": "Least-privilege permissions for the popover window",
   "windows": ["popover"],
-  "permissions": ["core:event:default", "allow-get-static-info", "allow-get-snapshot"]
+  "permissions": [
+    "core:event:default",
+    "allow-get-static-info",
+    "allow-get-snapshot",
+    "allow-set-detail-enabled",
+    "allow-get-settings",
+    "allow-set-settings",
+    "allow-hide-popover",
+    "allow-resize-popover",
+    "allow-quit-app"
+  ]
 }

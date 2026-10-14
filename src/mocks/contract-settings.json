@@ -1,0 +1,22 @@
+{
+  "settings": {
+    "titleFormat": "compact",
+    "showTrayIcon": false,
+    "theme": "dark",
+    "reduceEffects": true,
+    "showNetworkDisks": true,
+    "memorySaver": true,
+    "launchAtLogin": true
+  },
+  "defaultSettings": {
+    "titleFormat": "default",
+    "showTrayIcon": true,
+    "theme": "system",
+    "reduceEffects": false,
+    "showNetworkDisks": false,
+    "memorySaver": false,
+    "launchAtLogin": false
+  },
+  "visibilityShown": { "visible": true, "view": "settings" },
+  "visibilityHidden": { "visible": false, "view": null }
+}

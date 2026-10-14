@@ -4,12 +4,17 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter, Runtime, State};
 
 use crate::model::{Snapshot, StaticInfo};
+use crate::popover;
 use crate::sampler::{SharedState, Sink};
+use crate::settings::{self, SettingsPayload, SettingsStore};
 use crate::tray::TRAY_ID;
 
 pub const POPOVER_LABEL: &str = "popover";
 pub const EVENT_SNAPSHOT: &str = "metrics://snapshot";
 pub const EVENT_DISKS_CHANGED: &str = "disks://changed";
+pub const EVENT_POPOVER_VISIBILITY: &str = "popover://visibility";
+
+const SETTINGS_SAVE_FAILED: &str = "settings could not be saved";
 
 pub struct AppState(pub Arc<SharedState>);
 
@@ -21,6 +26,56 @@ pub fn get_static_info(state: State<'_, AppState>) -> Option<StaticInfo> {
 #[tauri::command]
 pub fn get_snapshot(state: State<'_, AppState>) -> Option<Snapshot> {
     state.0.snapshot()
+}
+
+#[tauri::command]
+pub fn set_detail_enabled(state: State<'_, AppState>, enabled: bool) {
+    state.0.detail_enabled.store(enabled, Ordering::Relaxed);
+}
+
+#[tauri::command]
+pub fn get_settings<R: Runtime>(
+    app: AppHandle<R>,
+    store: State<'_, SettingsStore>,
+) -> SettingsPayload {
+    SettingsPayload {
+        settings: store.get(),
+        launch_at_login: settings::launch_at_login(&app),
+    }
+}
+
+#[tauri::command]
+pub fn set_settings<R: Runtime>(
+    app: AppHandle<R>,
+    store: State<'_, SettingsStore>,
+    settings: SettingsPayload,
+) -> Result<SettingsPayload, String> {
+    let previous = store.get();
+    store.save(settings.settings.clone()).map_err(|err| {
+        log::warn!("could not save settings: {err}");
+        SETTINGS_SAVE_FAILED.to_owned()
+    })?;
+    settings::apply(&app, &previous, &settings.settings);
+    let launch_at_login = settings::set_launch_at_login(&app, settings.launch_at_login);
+    Ok(SettingsPayload {
+        settings: store.get(),
+        launch_at_login,
+    })
+}
+
+#[tauri::command]
+pub fn hide_popover<R: Runtime>(app: AppHandle<R>) {
+    popover::hide(&app, true);
+}
+
+#[tauri::command]
+pub fn resize_popover<R: Runtime>(app: AppHandle<R>, height: u32) {
+    popover::resize(&app, height);
+}
+
+#[tauri::command]
+pub fn quit_app<R: Runtime>(app: AppHandle<R>) {
+    app.exit(0);
 }
 
 pub struct TauriSink<R: Runtime> {

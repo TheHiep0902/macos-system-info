@@ -1,4 +1,13 @@
-const APP_COMMANDS: &[&str] = &["get_static_info", "get_snapshot"];
+const APP_COMMANDS: &[&str] = &[
+    "get_static_info",
+    "get_snapshot",
+    "set_detail_enabled",
+    "get_settings",
+    "set_settings",
+    "hide_popover",
+    "resize_popover",
+    "quit_app",
+];
 
 fn main() {
     tauri_build::try_build(

@@ -1,13 +1,19 @@
 use objc2::MainThreadMarker;
 use objc2_app_kit::{NSFont, NSFontWeightRegular};
 use tauri::image::Image;
-use tauri::tray::{TrayIcon, TrayIconBuilder};
-use tauri::{AppHandle, Runtime};
+use tauri::menu::{CheckMenuItem, CheckMenuItemBuilder, MenuBuilder, MenuEvent, MenuItemBuilder};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
+use tauri::{AppHandle, Manager, Runtime};
 
 use crate::model::{MetricState, PowerSample};
+use crate::popover::{self, Anchor, RequestedView};
 
 pub const TRAY_ID: &str = "main";
 pub const INITIAL_TITLE: &str = "CPU –% · –W · RAM –%";
+pub const MENU_OPEN: &str = "open";
+pub const MENU_LAUNCH_AT_LOGIN: &str = "launch-at-login";
+pub const MENU_SETTINGS: &str = "settings";
+pub const MENU_QUIT: &str = "quit";
 
 const TRAY_ICON: &[u8] = include_bytes!("../icons/tray-template@2x.png");
 const FIGURE_SPACE: char = '\u{2007}';
@@ -71,18 +77,89 @@ pub fn format_title(
     }
 }
 
-pub fn create<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<TrayIcon<R>> {
-    let tray = TrayIconBuilder::with_id(TRAY_ID)
-        .icon(Image::from_bytes(TRAY_ICON)?)
+pub struct TrayMenu<R: Runtime> {
+    launch_at_login: CheckMenuItem<R>,
+}
+
+fn handle_menu<R: Runtime>(app: &AppHandle<R>, event: &MenuEvent) {
+    match event.id().as_ref() {
+        MENU_OPEN => popover::show(app, Anchor::Tray, Some(RequestedView::Overview)),
+        MENU_SETTINGS => popover::show(app, Anchor::Tray, Some(RequestedView::Settings)),
+        MENU_LAUNCH_AT_LOGIN => {
+            let target = !crate::settings::launch_at_login(app);
+            crate::settings::set_launch_at_login(app, target);
+            popover::refresh_if_visible(app);
+        }
+        MENU_QUIT => app.exit(0),
+        _ => {}
+    }
+}
+
+fn handle_tray_event<R: Runtime>(tray: &TrayIcon<R>, event: TrayIconEvent) {
+    if let TrayIconEvent::Click {
+        button: MouseButton::Left,
+        button_state: MouseButtonState::Up,
+        rect,
+        ..
+    } = event
+    {
+        popover::toggle(tray.app_handle(), rect);
+    }
+}
+
+pub fn create<R: Runtime>(
+    app: &AppHandle<R>,
+    show_icon: bool,
+    launch_at_login: bool,
+) -> tauri::Result<(TrayIcon<R>, TrayMenu<R>)> {
+    let launch_item = CheckMenuItemBuilder::with_id(MENU_LAUNCH_AT_LOGIN, "Khởi động cùng macOS")
+        .checked(launch_at_login)
+        .build(app)?;
+    let menu = MenuBuilder::new(app)
+        .item(&MenuItemBuilder::with_id(MENU_OPEN, "Mở Pulsebar").build(app)?)
+        .item(&launch_item)
+        .item(&MenuItemBuilder::with_id(MENU_SETTINGS, "Cài đặt…").build(app)?)
+        .separator()
+        .item(&MenuItemBuilder::with_id(MENU_QUIT, "Thoát").build(app)?)
+        .build()?;
+    let mut builder = TrayIconBuilder::with_id(TRAY_ID)
         .icon_as_template(true)
         .title(INITIAL_TITLE)
         .tooltip("Pulsebar")
+        .menu(&menu)
         .show_menu_on_left_click(false)
-        .build(app)?;
+        .on_menu_event(|app, event| handle_menu(app, &event))
+        .on_tray_icon_event(handle_tray_event);
+    if show_icon {
+        builder = builder.icon(Image::from_bytes(TRAY_ICON)?);
+    }
+    let tray = builder.build(app)?;
     if let Err(err) = apply_monospaced_digits(&tray) {
         log::warn!("could not apply monospaced digit font to tray title: {err}");
     }
-    Ok(tray)
+    Ok((
+        tray,
+        TrayMenu {
+            launch_at_login: launch_item,
+        },
+    ))
+}
+
+pub fn set_icon_visible<R: Runtime>(tray: &TrayIcon<R>, visible: bool) -> tauri::Result<()> {
+    let icon = if visible {
+        Some(Image::from_bytes(TRAY_ICON)?)
+    } else {
+        None
+    };
+    tray.set_icon_with_as_template(icon, true)
+}
+
+pub fn sync_launch_at_login<R: Runtime>(app: &AppHandle<R>, enabled: bool) {
+    if let Some(menu) = app.try_state::<TrayMenu<R>>()
+        && let Err(err) = menu.launch_at_login.set_checked(enabled)
+    {
+        log::warn!("could not update the launch-at-login menu item: {err}");
+    }
 }
 
 fn apply_monospaced_digits<R: Runtime>(tray: &TrayIcon<R>) -> tauri::Result<()> {

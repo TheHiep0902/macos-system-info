@@ -1,0 +1,183 @@
+{
+  "seq": 60,
+  "timestampMs": 1760400123456,
+  "cpu": {
+    "totalUsagePct": 24.96,
+    "frequency": {
+      "state": "ok",
+      "source": "ioReport",
+      "avgMhz": 2115,
+      "minMhz": 972,
+      "maxMhz": 3504,
+      "perCoreAvailable": true,
+      "speedLimitPct": null
+    },
+    "clusters": [
+      {
+        "label": "E",
+        "freqMhz": 1038,
+        "usagePct": 10.54
+      },
+      {
+        "label": "P",
+        "freqMhz": 3192,
+        "usagePct": 39.38
+      }
+    ],
+    "cores": [
+      {
+        "id": 0,
+        "cluster": "E",
+        "usagePct": 8.5,
+        "freqMhz": 972,
+        "activeRatio": 0.19
+      },
+      {
+        "id": 1,
+        "cluster": "E",
+        "usagePct": 12.25,
+        "freqMhz": 1020,
+        "activeRatio": 0.22
+      },
+      {
+        "id": 2,
+        "cluster": "E",
+        "usagePct": 6.75,
+        "freqMhz": 1056,
+        "activeRatio": 0.17
+      },
+      {
+        "id": 3,
+        "cluster": "E",
+        "usagePct": 15.5,
+        "freqMhz": 1188,
+        "activeRatio": 0.26
+      },
+      {
+        "id": 4,
+        "cluster": "E",
+        "usagePct": 9.25,
+        "freqMhz": 972,
+        "activeRatio": 0.19
+      },
+      {
+        "id": 5,
+        "cluster": "E",
+        "usagePct": 11,
+        "freqMhz": 1020,
+        "activeRatio": 0.21
+      },
+      {
+        "id": 6,
+        "cluster": "P",
+        "usagePct": 45.5,
+        "freqMhz": 3504,
+        "activeRatio": 0.56
+      },
+      {
+        "id": 7,
+        "cluster": "P",
+        "usagePct": 38.25,
+        "freqMhz": 3204,
+        "activeRatio": 0.48
+      },
+      {
+        "id": 8,
+        "cluster": "P",
+        "usagePct": 52.75,
+        "freqMhz": 3504,
+        "activeRatio": 0.63
+      },
+      {
+        "id": 9,
+        "cluster": "P",
+        "usagePct": 30.5,
+        "freqMhz": 2988,
+        "activeRatio": 0.41
+      },
+      {
+        "id": 10,
+        "cluster": "P",
+        "usagePct": 28,
+        "freqMhz": 2748,
+        "activeRatio": 0.38
+      },
+      {
+        "id": 11,
+        "cluster": "P",
+        "usagePct": 41.25,
+        "freqMhz": 3204,
+        "activeRatio": 0.51
+      }
+    ]
+  },
+  "power": {
+    "state": "ok",
+    "cpuWatts": 8.5,
+    "smoothedCpuWatts": 8.25,
+    "source": "ioreport",
+    "scope": "cpu"
+  },
+  "memory": {
+    "usedBytes": 23773642752,
+    "totalBytes": 38654705664,
+    "usedPct": 61.5,
+    "appBytes": 15032385536,
+    "wiredBytes": 4294967296,
+    "compressedBytes": 4446289920,
+    "cachedBytes": 8589934592,
+    "swapUsedBytes": 536870912
+  },
+  "disks": [
+    {
+      "id": "fsid-16777234-26",
+      "name": "Macintosh HD",
+      "mountPoint": "/",
+      "fsType": "apfs",
+      "isBoot": true,
+      "isRemovable": false,
+      "isNetwork": false,
+      "totalBytes": 994662584320,
+      "availableBytes": 412316860416,
+      "availableImportantBytes": 468151435264,
+      "usedBytes": 582345723904,
+      "usedPct": 58.55
+    },
+    {
+      "id": "fsid-16777240-28",
+      "name": "SANDISK",
+      "mountPoint": "/Volumes/SANDISK",
+      "fsType": "exfat",
+      "isBoot": false,
+      "isRemovable": true,
+      "isNetwork": false,
+      "totalBytes": 61530439680,
+      "availableBytes": 9663676416,
+      "availableImportantBytes": null,
+      "usedBytes": 51866763264,
+      "usedPct": 84.29
+    },
+    {
+      "id": "fsid-822083586-31",
+      "name": "Chia sẻ",
+      "mountPoint": "/Volumes/Chia sẻ",
+      "fsType": "smbfs",
+      "isBoot": false,
+      "isRemovable": false,
+      "isNetwork": true,
+      "totalBytes": 3995903488000,
+      "availableBytes": 1288490188800,
+      "availableImportantBytes": null,
+      "usedBytes": 2707413299200,
+      "usedPct": 67.75
+    }
+  ],
+  "network": {
+    "wifiInterface": "en0",
+    "wifiIpv4": "192.168.1.23",
+    "wifiIpv6": "2001:db8:1f70::1a2b",
+    "isWifiConnected": true,
+    "primaryInterface": "en0"
+  },
+  "uptimeSecs": 123456
+}
