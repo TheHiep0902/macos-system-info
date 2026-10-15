@@ -118,6 +118,11 @@
     "source": "ioreport",
     "scope": "cpu"
   },
+  "temperature": {
+    "state": "ok",
+    "celsius": 52.5,
+    "source": "smc:TCMb"
+  },
   "memory": {
     "usedBytes": 23773642752,
     "totalBytes": 38654705664,

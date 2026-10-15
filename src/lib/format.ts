@@ -69,6 +69,10 @@ export function formatWatts(watts: number | null | undefined): string {
   return `${text}${NBSP}W`;
 }
 
+export function formatCelsius(celsius: number | null | undefined): string {
+  return isUsable(celsius) ? `${integerFormat.format(Math.round(celsius))}${NBSP}°C` : PLACEHOLDER;
+}
+
 export function formatUptime(totalSeconds: number | null | undefined): string {
   if (!isUsable(totalSeconds) || totalSeconds < 0) {
     return PLACEHOLDER;
@@ -110,9 +114,12 @@ export function sourceLabel(source: string): string {
   if (normalized === 'nominal') {
     return t('source.nominal');
   }
+  if (normalized === 'macmon') {
+    return t('source.macmon');
+  }
   const smc = SMC_SOURCE.exec(source);
   if (smc?.[1] !== undefined) {
-    return t('source.smc', { key: smc[1].toUpperCase() });
+    return t('source.smc', { key: smc[1] });
   }
   return source;
 }

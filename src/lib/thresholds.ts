@@ -4,7 +4,7 @@ export type LoadStatus = 'normal' | 'warn' | 'critical';
 
 export type DisplayStatus = LoadStatus | 'unavailable';
 
-export type ThresholdMetric = 'cpu' | 'memory' | 'disk';
+export type ThresholdMetric = 'cpu' | 'memory' | 'disk' | 'temperature';
 
 interface Threshold {
   warn: number;
@@ -15,6 +15,7 @@ export const THRESHOLDS: Readonly<Record<ThresholdMetric, Threshold>> = {
   cpu: { warn: 70, critical: 90 },
   memory: { warn: 75, critical: 90 },
   disk: { warn: 80, critical: 95 },
+  temperature: { warn: 80, critical: 95 },
 };
 
 export function statusFor(metric: ThresholdMetric, percent: number): DisplayStatus {

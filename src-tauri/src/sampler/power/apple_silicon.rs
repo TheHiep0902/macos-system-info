@@ -116,15 +116,19 @@ mod session {
 
     const SAMPLER_NOT_RUNNING: &str = "macmon sampler is not running";
 
+    const MAX_CONSECUTIVE_FAILURES: u32 = 3;
+
     #[derive(Debug, Clone, PartialEq)]
     pub(super) struct Sample {
         pub(super) cpu_power: f32,
         pub(super) tiers: Vec<TierReading>,
+        pub(super) cpu_temp: Option<f32>,
     }
 
     enum Outcome {
         Fresh(Sample),
         Discarded,
+        Skipped,
         Failed(SourceError),
     }
 
@@ -133,6 +137,7 @@ mod session {
         last_attempt: Option<Instant>,
         last_error: String,
         discard_next: bool,
+        consecutive_failures: u32,
         cached: Option<(u64, Outcome)>,
     }
 
@@ -153,6 +158,7 @@ mod session {
                 last_attempt: Some(now),
                 last_error,
                 discard_next: false,
+                consecutive_failures: 0,
                 cached: None,
             }
         }
@@ -184,7 +190,7 @@ mod session {
             match &self.cached {
                 Some((_, Outcome::Fresh(sample))) => Ok(Some(sample)),
                 Some((_, Outcome::Failed(err))) => Err(err.clone()),
-                Some((_, Outcome::Discarded)) | None => Ok(None),
+                Some((_, Outcome::Discarded | Outcome::Skipped)) | None => Ok(None),
             }
         }
 
@@ -205,6 +211,7 @@ mod session {
             match collect(&mut sampler) {
                 Ok(sample) => {
                     self.sampler = Some(sampler);
+                    self.consecutive_failures = 0;
                     if mem::take(&mut self.discard_next) {
                         Outcome::Discarded
                     } else {
@@ -212,8 +219,18 @@ mod session {
                     }
                 }
                 Err(err) => {
+                    self.consecutive_failures = self.consecutive_failures.saturating_add(1);
+                    if self.consecutive_failures < MAX_CONSECUTIVE_FAILURES {
+                        log::debug!(
+                            "macmon sampling failed ({}/{MAX_CONSECUTIVE_FAILURES}), keeping sampler: {err}",
+                            self.consecutive_failures
+                        );
+                        self.sampler = Some(sampler);
+                        return Outcome::Skipped;
+                    }
+                    self.consecutive_failures = 0;
                     log::warn!(
-                        "macmon sampling failed, sampler dropped, retrying in {}s: {err}",
+                        "macmon sampling failed {MAX_CONSECUTIVE_FAILURES} times in a row, sampler dropped, retrying in {}s: {err}",
                         RETRY_INTERVAL.as_secs()
                     );
                     self.last_error.clone_from(&err);
@@ -240,6 +257,7 @@ mod session {
                 Ok(sampler) => {
                     log::info!("macmon sampler restored");
                     self.discard_next = false;
+                    self.consecutive_failures = 0;
                     Ok(sampler)
                 }
                 Err(err) => {
@@ -263,8 +281,141 @@ mod session {
     }
 }
 
+#[cfg(any(test, target_arch = "aarch64"))]
+mod temperature {
+    use super::session::Sample;
+    use crate::sampler::power::{
+        REASON_NO_TEMP_SENSOR, REASON_READ_FAILED, SourceError, TempReading,
+    };
+
+    pub(super) const FIRMWARE_TEMP_KEYS: [&str; 2] = ["TCMb", "TCMz"];
+
+    const FIRMWARE_TEMP_SOURCES: [&str; 2] = ["smc:TCMb", "smc:TCMz"];
+
+    pub(super) const MACMON_TEMP_SOURCE: &str = "macmon";
+
+    const MIN_CELSIUS: f32 = 15.0;
+
+    const MAX_CELSIUS: f32 = 130.0;
+
+    const INVALID_SAMPLE_LIMIT: u32 = 3;
+
+    pub(super) fn is_valid_apple_celsius(celsius: f32) -> bool {
+        celsius.is_finite() && (MIN_CELSIUS..=MAX_CELSIUS).contains(&celsius)
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(super) struct FirmwareKey {
+        pub(super) key: &'static str,
+        pub(super) source: &'static str,
+    }
+
+    impl FirmwareKey {
+        pub(super) fn reading(self, celsius: f32) -> TempReading {
+            TempReading {
+                celsius,
+                source: self.source,
+            }
+        }
+    }
+
+    pub(super) fn pick_firmware_key(
+        mut read: impl FnMut(&'static str) -> Result<f32, String>,
+    ) -> Result<(FirmwareKey, f32), String> {
+        let mut notes = Vec::with_capacity(FIRMWARE_TEMP_KEYS.len());
+        for (key, source) in FIRMWARE_TEMP_KEYS.into_iter().zip(FIRMWARE_TEMP_SOURCES) {
+            match read(key) {
+                Ok(celsius) if is_valid_apple_celsius(celsius) => {
+                    return Ok((FirmwareKey { key, source }, celsius));
+                }
+                Ok(celsius) => notes.push(format!("{key}={celsius} °C")),
+                Err(err) => notes.push(format!("{key}: {err}")),
+            }
+        }
+        Err(notes.join("; "))
+    }
+
+    #[derive(Debug, Clone, PartialEq)]
+    pub(super) enum SessionTemp {
+        Fresh(Option<f32>),
+        Skipped,
+        Failed(SourceError),
+    }
+
+    impl SessionTemp {
+        pub(super) fn from_sample(result: Result<Option<&Sample>, SourceError>) -> Self {
+            match result {
+                Ok(Some(sample)) => SessionTemp::Fresh(sample.cpu_temp),
+                Ok(None) => SessionTemp::Skipped,
+                Err(err) => SessionTemp::Failed(err),
+            }
+        }
+    }
+
+    #[derive(Debug, Default)]
+    pub(super) struct TempResolver {
+        invalid_samples: u32,
+        had_number: bool,
+    }
+
+    impl TempResolver {
+        pub(super) fn resolve(
+            &mut self,
+            own: Option<TempReading>,
+            session: SessionTemp,
+        ) -> Result<Option<TempReading>, SourceError> {
+            if let Some(reading) = own.filter(|reading| is_valid_apple_celsius(reading.celsius)) {
+                return Ok(Some(self.accept(reading)));
+            }
+            match session {
+                SessionTemp::Fresh(Some(celsius)) if is_valid_apple_celsius(celsius) => {
+                    Ok(Some(self.accept(TempReading {
+                        celsius,
+                        source: MACMON_TEMP_SOURCE,
+                    })))
+                }
+                SessionTemp::Fresh(value) => self.reject(value),
+                SessionTemp::Skipped => Ok(None),
+                SessionTemp::Failed(err) => Err(err),
+            }
+        }
+
+        pub(super) fn reset(&mut self) {
+            self.invalid_samples = 0;
+        }
+
+        fn accept(&mut self, reading: TempReading) -> TempReading {
+            self.invalid_samples = 0;
+            self.had_number = true;
+            reading
+        }
+
+        fn reject(&mut self, value: Option<f32>) -> Result<Option<TempReading>, SourceError> {
+            self.invalid_samples = self.invalid_samples.saturating_add(1);
+            if self.invalid_samples < INVALID_SAMPLE_LIMIT {
+                log::debug!(
+                    "macmon cpu_temp_avg rejected ({}/{INVALID_SAMPLE_LIMIT}): {value:?}",
+                    self.invalid_samples
+                );
+                return Ok(None);
+            }
+            let reason = if self.had_number {
+                REASON_READ_FAILED
+            } else {
+                REASON_NO_TEMP_SENSOR
+            };
+            Err(SourceError::new(
+                reason,
+                format!(
+                    "no valid cpu_temp_avg in {INVALID_SAMPLE_LIMIT} consecutive macmon samples (last {value:?})"
+                ),
+            ))
+        }
+    }
+}
+
 #[cfg(target_arch = "aarch64")]
-pub use self::macmon_backend::{MacmonFreq, MacmonPower, macmon_sources};
+pub use self::macmon_backend::{MacmonFreq, MacmonPower, MacmonTemp, macmon_sources};
 
 #[cfg(target_arch = "aarch64")]
 mod macmon_backend {
@@ -272,13 +423,16 @@ mod macmon_backend {
     use std::rc::Rc;
     use std::time::Instant;
 
+    use macmon::sources::SMC;
     use macmon::{CpuCoreMetrics, Metrics, Sampler};
 
     use super::session::{Sample, Session, validate_watts};
+    use super::temperature::{FirmwareKey, SessionTemp, TempResolver, pick_firmware_key};
     use super::{CoreReading, TierReading, cluster_max_from_tiers, map_tiers};
     use crate::model;
     use crate::sampler::power::{
-        FreqReading, FreqSource, PowerScope, PowerSource, SAMPLE_INTERVAL, SourceError, Tick,
+        FreqReading, FreqSource, PowerScope, PowerSource, SAMPLE_INTERVAL, SourceError,
+        TempReading, TempSource, Tick,
     };
     use crate::topology::Topology;
 
@@ -298,14 +452,66 @@ mod macmon_backend {
         shared: Rc<RefCell<Shared>>,
     }
 
-    pub fn macmon_sources(topology: Topology) -> (MacmonPower, MacmonFreq) {
+    pub struct MacmonTemp {
+        shared: Rc<RefCell<Shared>>,
+        firmware: Option<FirmwareSensor>,
+        resolver: TempResolver,
+    }
+
+    struct FirmwareSensor {
+        smc: SMC,
+        key: FirmwareKey,
+    }
+
+    impl FirmwareSensor {
+        fn open() -> Option<Self> {
+            let mut smc = match SMC::new() {
+                Ok(smc) => smc,
+                Err(err) => {
+                    log::info!("SMC handle unavailable, using macmon cpu_temp_avg: {err}");
+                    return None;
+                }
+            };
+            match pick_firmware_key(|key| smc.read_float_val(key).map_err(|err| err.to_string())) {
+                Ok((key, celsius)) => {
+                    log::info!("SMC temperature key {} selected ({celsius:.1} °C)", key.key);
+                    Some(FirmwareSensor { smc, key })
+                }
+                Err(detail) => {
+                    log::info!(
+                        "no SMC firmware temperature key, using macmon cpu_temp_avg: {detail}"
+                    );
+                    None
+                }
+            }
+        }
+
+        fn read(&mut self) -> Option<TempReading> {
+            match self.smc.read_float_val(self.key.key) {
+                Ok(celsius) => Some(self.key.reading(celsius)),
+                Err(err) => {
+                    log::debug!("SMC {} read failed: {err}", self.key.key);
+                    None
+                }
+            }
+        }
+    }
+
+    pub fn macmon_sources(topology: Topology) -> (MacmonPower, MacmonFreq, MacmonTemp) {
         let session = Session::new(open_sampler(), Instant::now());
         let shared = Rc::new(RefCell::new(Shared { session, topology }));
         (
             MacmonPower {
                 shared: Rc::clone(&shared),
             },
-            MacmonFreq { shared },
+            MacmonFreq {
+                shared: Rc::clone(&shared),
+            },
+            MacmonTemp {
+                shared,
+                firmware: FirmwareSensor::open(),
+                resolver: TempResolver::default(),
+            },
         )
     }
 
@@ -327,6 +533,7 @@ mod macmon_backend {
                 to_tier(metrics.ecpu_freq_mhz, &metrics.ecpu_cores),
                 to_tier(metrics.pcpu_freq_mhz, &metrics.pcpu_cores),
             ],
+            cpu_temp: metrics.temp.cpu_temp_avg,
         }
     }
 
@@ -396,6 +603,22 @@ mod macmon_backend {
             self.shared.borrow_mut().session.reset();
         }
     }
+
+    impl TempSource for MacmonTemp {
+        fn read(&mut self, tick: &Tick) -> Result<Option<TempReading>, SourceError> {
+            let session = {
+                let mut shared = self.shared.borrow_mut();
+                SessionTemp::from_sample(shared.session.sample(tick, open_sampler, collect))
+            };
+            let own = self.firmware.as_mut().and_then(FirmwareSensor::read);
+            self.resolver.resolve(own, session)
+        }
+
+        fn reset(&mut self) {
+            self.shared.borrow_mut().session.reset();
+            self.resolver.reset();
+        }
+    }
 }
 
 #[cfg(test)]
@@ -406,9 +629,16 @@ mod tests {
     use std::rc::Rc;
 
     use super::session::{Sample, Session, validate_watts};
+    use super::temperature::{
+        FIRMWARE_TEMP_KEYS, MACMON_TEMP_SOURCE, SessionTemp, TempResolver, is_valid_apple_celsius,
+        pick_firmware_key,
+    };
     use super::*;
     use crate::model::ClusterInfo;
-    use crate::sampler::power::{REASON_READ_FAILED, REASON_SENSOR_INIT, SourceError, Tick};
+    use crate::sampler::power::{
+        REASON_NO_TEMP_SENSOR, REASON_READ_FAILED, REASON_SENSOR_INIT, SourceError, TempReading,
+        Tick,
+    };
 
     fn cluster(label: &str, core_count: u32) -> ClusterInfo {
         ClusterInfo {
@@ -638,6 +868,7 @@ mod tests {
         Sample {
             cpu_power,
             tiers: vec![tier(1000, vec![core(1000, 0.5)])],
+            cpu_temp: None,
         }
     }
 
@@ -796,27 +1027,39 @@ mod tests {
         let start = Instant::now();
         let calls = Rc::new(Cell::new(0));
         let opens = Cell::new(0);
-        let results = vec![Ok(sample(2.0)), Err("SMC read failed".into())];
+        let results = vec![
+            Ok(sample(2.0)),
+            Err("SMC read failed".into()),
+            Err("SMC read failed".into()),
+            Err("SMC read failed".into()),
+        ];
         let mut session = Session::new(Ok(fake(results, &calls)), start);
         assert_eq!(
             read(&mut session, &tick(1, start, 2), &opens, never),
             Ok(Some(2.0))
         );
+        for seq in 2..=3 {
+            assert_eq!(
+                read(&mut session, &tick(seq, start, seq * 2), &opens, never),
+                Ok(None)
+            );
+            assert!(session.is_up());
+        }
 
-        let failing = tick(2, start, 4);
+        let failing = tick(4, start, 8);
         let err = read(&mut session, &failing, &opens, never).unwrap_err();
         assert_eq!(err, SourceError::new(REASON_READ_FAILED, "SMC read failed"));
         assert_eq!(read(&mut session, &failing, &opens, never), Err(err));
         assert!(!session.is_up());
-        assert_eq!(calls.get(), 2);
+        assert_eq!(calls.get(), 4);
 
-        let down = read(&mut session, &tick(3, start, 6), &opens, never).unwrap_err();
+        let down = read(&mut session, &tick(5, start, 10), &opens, never).unwrap_err();
         assert_eq!(
             down,
             SourceError::new(REASON_SENSOR_INIT, "SMC read failed")
         );
         assert_eq!(
-            read(&mut session, &tick(4, start, 63), &opens, never)
+            read(&mut session, &tick(6, start, 67), &opens, never)
                 .unwrap_err()
                 .reason,
             REASON_SENSOR_INIT
@@ -825,8 +1068,95 @@ mod tests {
 
         let reopened = || Ok(fake(vec![Ok(sample(4.0))], &calls));
         assert_eq!(
-            read(&mut session, &tick(5, start, 64), &opens, reopened),
+            read(&mut session, &tick(7, start, 68), &opens, reopened),
             Ok(Some(4.0))
+        );
+        assert_eq!(opens.get(), 1);
+    }
+
+    #[test]
+    fn first_two_consecutive_failures_keep_the_sampler() {
+        let start = Instant::now();
+        let calls = Rc::new(Cell::new(0));
+        let opens = Cell::new(0);
+        let results = vec![Err("first".into()), Err("second".into()), Ok(sample(3.0))];
+        let mut session = Session::new(Ok(fake(results, &calls)), start);
+        let first = tick(1, start, 2);
+        assert_eq!(read(&mut session, &first, &opens, never), Ok(None));
+        assert_eq!(read(&mut session, &first, &opens, never), Ok(None));
+        assert!(session.is_up());
+        assert_eq!(calls.get(), 1);
+        assert_eq!(
+            read(&mut session, &tick(2, start, 4), &opens, never),
+            Ok(None)
+        );
+        assert!(session.is_up());
+        assert_eq!(
+            read(&mut session, &tick(3, start, 6), &opens, never),
+            Ok(Some(3.0))
+        );
+        assert_eq!(calls.get(), 3);
+        assert_eq!(opens.get(), 0);
+    }
+
+    #[test]
+    fn success_between_failures_resets_the_failure_count() {
+        let start = Instant::now();
+        let calls = Rc::new(Cell::new(0));
+        let opens = Cell::new(0);
+        let results = vec![
+            Err("a".into()),
+            Err("b".into()),
+            Ok(sample(5.0)),
+            Err("c".into()),
+            Err("d".into()),
+            Ok(sample(6.0)),
+        ];
+        let mut session = Session::new(Ok(fake(results, &calls)), start);
+        let readings: Vec<_> = (1..=6)
+            .map(|seq| read(&mut session, &tick(seq, start, seq * 2), &opens, never))
+            .collect();
+        assert_eq!(
+            readings,
+            [
+                Ok(None),
+                Ok(None),
+                Ok(Some(5.0)),
+                Ok(None),
+                Ok(None),
+                Ok(Some(6.0))
+            ]
+        );
+        assert!(session.is_up());
+        assert_eq!(opens.get(), 0);
+    }
+
+    #[test]
+    fn first_failure_after_reopen_does_not_drop_the_sampler() {
+        let start = Instant::now();
+        let calls = Rc::new(Cell::new(0));
+        let opens = Cell::new(0);
+        let results = vec![Err("a".into()), Err("b".into()), Err("c".into())];
+        let mut session = Session::new(Ok(fake(results, &calls)), start);
+        for seq in 1..=2 {
+            assert_eq!(
+                read(&mut session, &tick(seq, start, seq * 2), &opens, never),
+                Ok(None)
+            );
+        }
+        let err = read(&mut session, &tick(3, start, 6), &opens, never).unwrap_err();
+        assert_eq!(err, SourceError::new(REASON_READ_FAILED, "c"));
+        assert!(!session.is_up());
+
+        let reopened = || Ok(fake(vec![Err("again".into()), Ok(sample(8.0))], &calls));
+        assert_eq!(
+            read(&mut session, &tick(4, start, 66), &opens, reopened),
+            Ok(None)
+        );
+        assert!(session.is_up());
+        assert_eq!(
+            read(&mut session, &tick(5, start, 68), &opens, never),
+            Ok(Some(8.0))
         );
         assert_eq!(opens.get(), 1);
     }
@@ -850,12 +1180,19 @@ mod tests {
         let start = Instant::now();
         let calls = Rc::new(Cell::new(0));
         let opens = Cell::new(0);
-        let mut session = Session::new(Ok(fake(vec![Err("boom".into())], &calls)), start);
+        let failures = vec![Err("boom".into()), Err("boom".into()), Err("boom".into())];
+        let mut session = Session::new(Ok(fake(failures, &calls)), start);
         session.reset();
-        assert!(read(&mut session, &tick(1, start, 2), &opens, never).is_err());
+        for seq in 1..=2 {
+            assert_eq!(
+                read(&mut session, &tick(seq, start, seq * 2), &opens, never),
+                Ok(None)
+            );
+        }
+        assert!(read(&mut session, &tick(3, start, 6), &opens, never).is_err());
         let reopened = || Ok(fake(vec![Ok(sample(7.0))], &calls));
         assert_eq!(
-            read(&mut session, &tick(2, start, 62), &opens, reopened),
+            read(&mut session, &tick(4, start, 66), &opens, reopened),
             Ok(Some(7.0))
         );
     }
@@ -875,5 +1212,269 @@ mod tests {
         assert_eq!(err.reason, REASON_SENSOR_INIT);
         assert!(!err.detail.is_empty());
         assert_eq!(opens.get(), 0);
+    }
+
+    fn firmware(source: &'static str, celsius: f32) -> Option<TempReading> {
+        Some(TempReading { celsius, source })
+    }
+
+    fn macmon(celsius: f32) -> Result<Option<TempReading>, SourceError> {
+        Ok(Some(TempReading {
+            celsius,
+            source: MACMON_TEMP_SOURCE,
+        }))
+    }
+
+    fn session_down() -> SourceError {
+        SourceError::new(REASON_SENSOR_INIT, "macmon sampler is not running")
+    }
+
+    fn fake_firmware(
+        replies: &[(&'static str, Result<f32, &str>)],
+    ) -> impl FnMut(&'static str) -> Result<f32, String> {
+        let replies: Vec<(&'static str, Result<f32, String>)> = replies
+            .iter()
+            .map(|(key, reply)| (*key, reply.map_err(str::to_string)))
+            .collect();
+        move |key| {
+            replies
+                .iter()
+                .find(|(candidate, _)| *candidate == key)
+                .map_or_else(
+                    || Err("SMC key not found".to_string()),
+                    |(_, reply)| reply.clone(),
+                )
+        }
+    }
+
+    #[test]
+    fn apple_celsius_bounds() {
+        for good in [15.0, 15.5, 48.0, 100.0, 130.0] {
+            assert!(is_valid_apple_celsius(good), "{good}");
+        }
+        for bad in [
+            14.99,
+            130.01,
+            0.0,
+            1.5,
+            8.0,
+            -1.0,
+            f32::NAN,
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+        ] {
+            assert!(!is_valid_apple_celsius(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn firmware_keys_are_tried_tcmb_then_tcmz() {
+        assert_eq!(FIRMWARE_TEMP_KEYS, ["TCMb", "TCMz"]);
+        let both = pick_firmware_key(fake_firmware(&[("TCMb", Ok(52.0)), ("TCMz", Ok(70.0))]));
+        let (key, celsius) = both.unwrap();
+        assert_eq!((key.key, celsius), ("TCMb", 52.0));
+        assert_eq!(key.reading(celsius), firmware("smc:TCMb", 52.0).unwrap());
+
+        let mut tried = Vec::new();
+        let mut read = fake_firmware(&[("TCMz", Ok(66.0))]);
+        let only_max = pick_firmware_key(|key| {
+            tried.push(key);
+            read(key)
+        });
+        let (key, celsius) = only_max.unwrap();
+        assert_eq!((key.key, key.source, celsius), ("TCMz", "smc:TCMz", 66.0));
+        assert_eq!(tried, ["TCMb", "TCMz"]);
+
+        let placeholder =
+            pick_firmware_key(fake_firmware(&[("TCMb", Ok(4.0)), ("TCMz", Ok(61.0))]));
+        assert_eq!(placeholder.unwrap().0.source, "smc:TCMz");
+    }
+
+    #[test]
+    fn no_firmware_key_lists_every_attempt() {
+        let detail = pick_firmware_key(fake_firmware(&[("TCMb", Ok(140.0))])).unwrap_err();
+        assert!(detail.contains("TCMb=140 °C"), "{detail}");
+        assert!(detail.contains("TCMz: SMC key not found"), "{detail}");
+    }
+
+    #[test]
+    fn session_result_maps_to_session_temp() {
+        let warm = Sample {
+            cpu_temp: Some(41.0),
+            ..sample(1.0)
+        };
+        assert_eq!(
+            SessionTemp::from_sample(Ok(Some(&warm))),
+            SessionTemp::Fresh(Some(41.0))
+        );
+        assert_eq!(
+            SessionTemp::from_sample(Ok(Some(&sample(1.0)))),
+            SessionTemp::Fresh(None)
+        );
+        assert_eq!(SessionTemp::from_sample(Ok(None)), SessionTemp::Skipped);
+        assert_eq!(
+            SessionTemp::from_sample(Err(session_down())),
+            SessionTemp::Failed(session_down())
+        );
+    }
+
+    #[test]
+    fn valid_firmware_reading_wins_whatever_the_session_reports() {
+        let sessions = [
+            SessionTemp::Fresh(Some(70.0)),
+            SessionTemp::Fresh(None),
+            SessionTemp::Skipped,
+            SessionTemp::Failed(session_down()),
+        ];
+        for session in sessions {
+            for source in ["smc:TCMb", "smc:TCMz"] {
+                let mut resolver = TempResolver::default();
+                assert_eq!(
+                    resolver.resolve(firmware(source, 55.0), session.clone()),
+                    Ok(firmware(source, 55.0)),
+                    "{source} with {session:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn missing_or_invalid_firmware_reading_falls_back_to_macmon() {
+        let mut resolver = TempResolver::default();
+        assert_eq!(
+            resolver.resolve(None, SessionTemp::Fresh(Some(48.0))),
+            macmon(48.0)
+        );
+        for own in [3.0, 131.0, f32::NAN] {
+            assert_eq!(
+                resolver.resolve(firmware("smc:TCMb", own), SessionTemp::Fresh(Some(49.0))),
+                macmon(49.0)
+            );
+        }
+    }
+
+    #[test]
+    fn skipped_session_without_firmware_keeps_the_previous_value() {
+        let mut resolver = TempResolver::default();
+        assert_eq!(resolver.resolve(None, SessionTemp::Skipped), Ok(None));
+        assert_eq!(
+            resolver.resolve(firmware("smc:TCMz", 2.0), SessionTemp::Skipped),
+            Ok(None)
+        );
+    }
+
+    #[test]
+    fn session_error_without_firmware_is_passed_through() {
+        let mut resolver = TempResolver::default();
+        assert_eq!(
+            resolver.resolve(None, SessionTemp::Failed(session_down())),
+            Err(session_down())
+        );
+        let failed = SourceError::new(REASON_READ_FAILED, "SMC read failed");
+        assert_eq!(
+            resolver.resolve(
+                firmware("smc:TCMb", 0.0),
+                SessionTemp::Failed(failed.clone())
+            ),
+            Err(failed)
+        );
+    }
+
+    #[test]
+    fn three_invalid_fresh_samples_without_any_number_report_missing_sensor() {
+        let mut resolver = TempResolver::default();
+        let samples = [None, Some(4.0), Some(140.0), None];
+        let results: Vec<_> = samples
+            .into_iter()
+            .map(|value| resolver.resolve(None, SessionTemp::Fresh(value)))
+            .collect();
+        assert_eq!(results[..2], [Ok(None), Ok(None)]);
+        for result in &results[2..] {
+            assert_eq!(result.as_ref().unwrap_err().reason, REASON_NO_TEMP_SENSOR);
+        }
+    }
+
+    #[test]
+    fn three_invalid_fresh_samples_after_a_number_report_read_failure() {
+        let mut resolver = TempResolver::default();
+        assert_eq!(
+            resolver.resolve(None, SessionTemp::Fresh(Some(50.0))),
+            macmon(50.0)
+        );
+        for _ in 0..2 {
+            assert_eq!(resolver.resolve(None, SessionTemp::Fresh(None)), Ok(None));
+        }
+        let err = resolver
+            .resolve(None, SessionTemp::Fresh(Some(1.5)))
+            .unwrap_err();
+        assert_eq!(err.reason, REASON_READ_FAILED);
+        assert!(err.detail.contains("Some(1.5)"), "{err}");
+    }
+
+    #[test]
+    fn firmware_number_counts_as_having_had_a_number() {
+        let mut resolver = TempResolver::default();
+        assert_eq!(
+            resolver.resolve(firmware("smc:TCMb", 60.0), SessionTemp::Fresh(None)),
+            Ok(firmware("smc:TCMb", 60.0))
+        );
+        for _ in 0..2 {
+            assert_eq!(resolver.resolve(None, SessionTemp::Fresh(None)), Ok(None));
+        }
+        let err = resolver
+            .resolve(None, SessionTemp::Fresh(None))
+            .unwrap_err();
+        assert_eq!(err.reason, REASON_READ_FAILED);
+    }
+
+    #[test]
+    fn valid_result_resets_the_invalid_sample_count() {
+        let mut resolver = TempResolver::default();
+        let inputs = [
+            (None, SessionTemp::Fresh(None)),
+            (None, SessionTemp::Fresh(None)),
+            (firmware("smc:TCMz", 72.0), SessionTemp::Fresh(None)),
+            (None, SessionTemp::Fresh(None)),
+            (None, SessionTemp::Fresh(None)),
+            (None, SessionTemp::Fresh(Some(45.0))),
+            (None, SessionTemp::Fresh(None)),
+            (None, SessionTemp::Fresh(None)),
+        ];
+        for (own, session) in inputs {
+            assert!(resolver.resolve(own, session).is_ok());
+        }
+        assert!(resolver.resolve(None, SessionTemp::Fresh(None)).is_err());
+    }
+
+    #[test]
+    fn skipped_and_failed_samples_neither_count_nor_reset() {
+        let mut resolver = TempResolver::default();
+        assert_eq!(resolver.resolve(None, SessionTemp::Fresh(None)), Ok(None));
+        assert_eq!(resolver.resolve(None, SessionTemp::Skipped), Ok(None));
+        assert!(
+            resolver
+                .resolve(None, SessionTemp::Failed(session_down()))
+                .is_err()
+        );
+        assert_eq!(resolver.resolve(None, SessionTemp::Fresh(None)), Ok(None));
+        assert_eq!(
+            resolver
+                .resolve(None, SessionTemp::Fresh(None))
+                .unwrap_err()
+                .reason,
+            REASON_NO_TEMP_SENSOR
+        );
+    }
+
+    #[test]
+    fn resolver_reset_clears_the_invalid_sample_count() {
+        let mut resolver = TempResolver::default();
+        for _ in 0..2 {
+            assert_eq!(resolver.resolve(None, SessionTemp::Fresh(None)), Ok(None));
+        }
+        resolver.reset();
+        for _ in 0..2 {
+            assert_eq!(resolver.resolve(None, SessionTemp::Fresh(None)), Ok(None));
+        }
     }
 }

@@ -11,6 +11,8 @@ pub mod intel_ioreport;
 pub mod intel_nominal;
 #[cfg(target_arch = "x86_64")]
 pub mod intel_smc;
+#[cfg(target_arch = "x86_64")]
+pub mod intel_temp;
 
 pub const SAMPLE_INTERVAL: Duration = Duration::from_secs(2);
 
@@ -19,6 +21,8 @@ pub const REASON_VM_POWER: &str = "Máy ảo không cung cấp cảm biến côn
 pub const REASON_VM_FREQ: &str = "Máy ảo không cung cấp cảm biến xung nhịp";
 pub const REASON_NO_POWER_SENSOR: &str = "Model Mac này không cung cấp cảm biến công suất CPU";
 pub const REASON_NO_FREQ_SENSOR: &str = "Không đọc được xung nhịp CPU";
+pub const REASON_VM_TEMP: &str = "Máy ảo không cung cấp cảm biến nhiệt độ";
+pub const REASON_NO_TEMP_SENSOR: &str = "Model Mac này không cung cấp cảm biến nhiệt độ CPU";
 pub const REASON_STALE_COUNTER: &str = "Bộ đếm năng lượng không cập nhật";
 pub const REASON_SENSOR_INIT: &str = "Không khởi tạo được bộ đọc cảm biến";
 pub const REASON_READ_FAILED: &str = "Không đọc được cảm biến";
@@ -89,10 +93,22 @@ pub trait PowerSource {
     fn reset(&mut self);
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TempReading {
+    pub celsius: f32,
+    pub source: &'static str,
+}
+
 pub trait FreqSource {
     fn kind(&self) -> model::FreqSource;
 
     fn read(&mut self, tick: &Tick) -> Result<Option<FreqReading>, SourceError>;
+
+    fn reset(&mut self);
+}
+
+pub trait TempSource {
+    fn read(&mut self, tick: &Tick) -> Result<Option<TempReading>, SourceError>;
 
     fn reset(&mut self);
 }
@@ -140,9 +156,12 @@ pub type PowerSlot = Selected<Box<dyn PowerSource>>;
 
 pub type FreqSlot = Selected<Box<dyn FreqSource>>;
 
+pub type TempSlot = Selected<Box<dyn TempSource>>;
+
 pub struct PowerBackend {
     pub power: PowerSlot,
     pub freq: FreqSlot,
+    pub temp: TempSlot,
     pub cluster_max_mhz: Vec<Option<u32>>,
 }
 
@@ -150,6 +169,7 @@ pub struct PowerBackend {
 enum Metric {
     Power,
     Freq,
+    Temp,
 }
 
 fn blocked_reason(env: HostEnv, metric: Metric) -> Option<&'static str> {
@@ -157,6 +177,7 @@ fn blocked_reason(env: HostEnv, metric: Metric) -> Option<&'static str> {
         (Arch::X86_64, _) if env.translated => Some(REASON_ROSETTA),
         (Arch::Arm64, Metric::Power) if env.virtual_machine => Some(REASON_VM_POWER),
         (Arch::Arm64, Metric::Freq) if env.virtual_machine => Some(REASON_VM_FREQ),
+        (_, Metric::Temp) if env.virtual_machine => Some(REASON_VM_TEMP),
         _ => None,
     }
 }
@@ -199,10 +220,20 @@ pub fn select_freq(env: HostEnv, chain: Vec<Factory<'_, Box<dyn FreqSource>>>) -
     )
 }
 
+pub fn select_temp(env: HostEnv, chain: Vec<Factory<'_, Box<dyn TempSource>>>) -> TempSlot {
+    select(
+        blocked_reason(env, Metric::Temp),
+        chain,
+        REASON_NO_TEMP_SENSOR,
+        Metric::Temp,
+    )
+}
+
 fn unavailable_backend(env: HostEnv) -> PowerBackend {
     PowerBackend {
         power: select_power(env, Vec::new()),
         freq: select_freq(env, Vec::new()),
+        temp: select_temp(env, Vec::new()),
         cluster_max_mhz: Vec::new(),
     }
 }
@@ -216,7 +247,7 @@ pub fn build_backend(env: HostEnv, topology: &Topology, facts: &HostFacts) -> Po
 
 #[cfg(target_arch = "aarch64")]
 fn platform_backend(env: HostEnv, topology: &Topology, _facts: &HostFacts) -> PowerBackend {
-    let (power, freq) = apple_silicon::macmon_sources(topology.clone());
+    let (power, freq, temp) = apple_silicon::macmon_sources(topology.clone());
     let cluster_max_mhz = power.cluster_max_mhz();
     PowerBackend {
         power: select_power(
@@ -229,6 +260,10 @@ fn platform_backend(env: HostEnv, topology: &Topology, _facts: &HostFacts) -> Po
             env,
             vec![Box::new(move || Ok(Box::new(freq) as Box<dyn FreqSource>))],
         ),
+        temp: select_temp(
+            env,
+            vec![Box::new(move || Ok(Box::new(temp) as Box<dyn TempSource>))],
+        ),
         cluster_max_mhz,
     }
 }
@@ -238,6 +273,7 @@ fn platform_backend(env: HostEnv, _topology: &Topology, facts: &HostFacts) -> Po
     use intel_ioreport::{IntelIoReport, IoReportFreq, IoReportPower};
     use intel_nominal::NominalFreq;
     use intel_smc::SmcPower;
+    use intel_temp::SmcTemp;
 
     let session = IntelIoReport::open(facts.nominal_mhz, facts.logical_cores);
     let power_session = session.clone();
@@ -261,9 +297,16 @@ fn platform_backend(env: HostEnv, _topology: &Topology, facts: &HostFacts) -> Po
             Box::new(|| Ok(Box::new(NominalFreq::new()) as Box<dyn FreqSource>)),
         ],
     );
+    let temp = select_temp(
+        env,
+        vec![Box::new(|| {
+            Ok(Box::new(SmcTemp::probe()?) as Box<dyn TempSource>)
+        })],
+    );
     PowerBackend {
         power,
         freq,
+        temp,
         cluster_max_mhz: vec![facts.max_mhz],
     }
 }
@@ -304,6 +347,31 @@ mod tests {
         }
 
         fn reset(&mut self) {}
+    }
+
+    struct FakeTemp;
+
+    impl TempSource for FakeTemp {
+        fn read(&mut self, _tick: &Tick) -> Result<Option<TempReading>, SourceError> {
+            Ok(None)
+        }
+
+        fn reset(&mut self) {}
+    }
+
+    fn temp_factory<'a>(
+        calls: &'a RefCell<Vec<&'static str>>,
+        name: &'static str,
+        ok: bool,
+    ) -> Factory<'a, Box<dyn TempSource>> {
+        Box::new(move || {
+            calls.borrow_mut().push(name);
+            if ok {
+                Ok(Box::new(FakeTemp) as Box<dyn TempSource>)
+            } else {
+                Err(SourceError::new(REASON_SENSOR_INIT, name))
+            }
+        })
     }
 
     fn intel() -> HostEnv {
@@ -464,6 +532,7 @@ mod tests {
         let backend = build_backend(env, &Topology::single_cluster(8), &facts("x86_64", true));
         assert_eq!(reason(&backend.power), Some(REASON_ROSETTA));
         assert_eq!(reason(&backend.freq), Some(REASON_ROSETTA));
+        assert_eq!(reason(&backend.temp), Some(REASON_ROSETTA));
         assert!(backend.cluster_max_mhz.is_empty());
     }
 
@@ -477,6 +546,48 @@ mod tests {
         let backend = build_backend(env, &Topology::single_cluster(8), &facts("arm64", false));
         assert_eq!(reason(&backend.power), Some(REASON_VM_POWER));
         assert_eq!(reason(&backend.freq), Some(REASON_VM_FREQ));
+        assert_eq!(reason(&backend.temp), Some(REASON_VM_TEMP));
+    }
+
+    #[test]
+    fn temperature_under_rosetta_or_in_any_vm_never_opens_sensors() {
+        let calls = RefCell::new(Vec::new());
+        let rosetta = HostEnv {
+            translated: true,
+            ..intel()
+        };
+        let intel_vm = HostEnv {
+            virtual_machine: true,
+            ..intel()
+        };
+        let arm_vm = HostEnv {
+            arch: Arch::Arm64,
+            translated: false,
+            virtual_machine: true,
+        };
+        let slot = select_temp(rosetta, vec![temp_factory(&calls, "smc", true)]);
+        assert_eq!(reason(&slot), Some(REASON_ROSETTA));
+        let slot = select_temp(intel_vm, vec![temp_factory(&calls, "smc", true)]);
+        assert_eq!(reason(&slot), Some(REASON_VM_TEMP));
+        let slot = select_temp(arm_vm, vec![temp_factory(&calls, "macmon", true)]);
+        assert_eq!(reason(&slot), Some(REASON_VM_TEMP));
+        assert!(calls.borrow().is_empty());
+    }
+
+    #[test]
+    fn temperature_without_any_candidate_reports_missing_sensor() {
+        let calls = RefCell::new(Vec::new());
+        let slot = select_temp(
+            intel(),
+            vec![
+                temp_factory(&calls, "smc", false),
+                temp_factory(&calls, "never", false),
+            ],
+        );
+        assert_eq!(reason(&slot), Some(REASON_NO_TEMP_SENSOR));
+        assert_eq!(*calls.borrow(), vec!["smc", "never"]);
+        let ready = select_temp(intel(), vec![temp_factory(&calls, "ok", true)]);
+        assert!(ready.ready().is_some());
     }
 
     #[test]

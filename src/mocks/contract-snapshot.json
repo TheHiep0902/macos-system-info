@@ -50,6 +50,11 @@
       "source": "ioreport",
       "scope": "cpu"
     },
+    "temperature": {
+      "state": "ok",
+      "celsius": 54.5,
+      "source": "smc:TCMb"
+    },
     "memory": {
       "usedBytes": 23773642752,
       "totalBytes": 38654705664,
@@ -100,5 +105,9 @@
     "maxMhz": null,
     "perCoreAvailable": false,
     "speedLimitPct": 100
+  },
+  "temperatureUnavailable": {
+    "state": "unavailable",
+    "reason": "Model Mac này không cung cấp cảm biến nhiệt độ CPU"
   }
 }

@@ -108,6 +108,13 @@ pub struct PowerSample {
     pub scope: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TemperatureSample {
+    pub celsius: f32,
+    pub source: String,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MemorySample {
@@ -155,6 +162,7 @@ pub struct Snapshot {
     pub timestamp_ms: i64,
     pub cpu: CpuSample,
     pub power: MetricState<PowerSample>,
+    pub temperature: MetricState<TemperatureSample>,
     pub memory: MemorySample,
     pub disks: Vec<DiskSample>,
     pub network: NetworkSample,
@@ -255,6 +263,10 @@ mod tests {
                 source: "ioreport".into(),
                 scope: "cpu".into(),
             }),
+            temperature: MetricState::Ok(TemperatureSample {
+                celsius: 54.5,
+                source: "smc:TCMb".into(),
+            }),
             memory: MemorySample {
                 used_bytes: 23_773_642_752,
                 total_bytes: 38_654_705_664,
@@ -308,6 +320,9 @@ mod tests {
             reason: "Máy ảo không cung cấp cảm biến công suất".into(),
         };
         let loading: MetricState<FrequencySample> = MetricState::Loading;
+        let temperature: MetricState<TemperatureSample> = MetricState::Unavailable {
+            reason: "Model Mac này không cung cấp cảm biến nhiệt độ CPU".into(),
+        };
         let nominal = MetricState::Ok(FrequencySample {
             source: FreqSource::Nominal,
             avg_mhz: None,
@@ -328,6 +343,10 @@ mod tests {
         assert_eq!(
             serde_json::to_value(nominal).unwrap(),
             fixture["frequencyNominal"]
+        );
+        assert_eq!(
+            serde_json::to_value(temperature).unwrap(),
+            fixture["temperatureUnavailable"]
         );
     }
 

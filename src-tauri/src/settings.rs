@@ -13,7 +13,7 @@ use tauri_plugin_autostart::ManagerExt;
 use crate::ipc::AppState;
 use crate::popover;
 use crate::sampler::SharedState;
-use crate::tray::{self, TRAY_ID};
+use crate::tray::{self, TRAY_ID, TitleMetrics};
 
 pub const SETTINGS_FILE: &str = "settings.json";
 pub const MAX_SETTINGS_BYTES: u64 = 64 * 1024;
@@ -42,6 +42,7 @@ pub enum ThemePreference {
 pub struct Settings {
     pub title_format: TitleFormatSetting,
     pub show_tray_icon: bool,
+    pub title_metrics: TitleMetrics,
     pub theme: ThemePreference,
     pub reduce_effects: bool,
     pub show_network_disks: bool,
@@ -53,11 +54,21 @@ impl Default for Settings {
         Settings {
             title_format: TitleFormatSetting::Default,
             show_tray_icon: true,
+            title_metrics: TitleMetrics::default(),
             theme: ThemePreference::System,
             reduce_effects: false,
             show_network_disks: false,
             memory_saver: false,
         }
+    }
+}
+
+impl Settings {
+    pub fn normalized(mut self) -> Self {
+        if self.title_metrics.is_empty() && !self.show_tray_icon {
+            self.show_tray_icon = true;
+        }
+        self
     }
 }
 
@@ -103,13 +114,16 @@ pub fn parse_settings(text: &str) -> Parsed {
         title_format: field(&object, "titleFormat", &mut repaired).unwrap_or(defaults.title_format),
         show_tray_icon: field(&object, "showTrayIcon", &mut repaired)
             .unwrap_or(defaults.show_tray_icon),
+        title_metrics: field(&object, "titleMetrics", &mut repaired)
+            .unwrap_or(defaults.title_metrics),
         theme: field(&object, "theme", &mut repaired).unwrap_or(defaults.theme),
         reduce_effects: field(&object, "reduceEffects", &mut repaired)
             .unwrap_or(defaults.reduce_effects),
         show_network_disks: field(&object, "showNetworkDisks", &mut repaired)
             .unwrap_or(defaults.show_network_disks),
         memory_saver: field(&object, "memorySaver", &mut repaired).unwrap_or(defaults.memory_saver),
-    };
+    }
+    .normalized();
     Parsed { settings, repaired }
 }
 
@@ -225,6 +239,7 @@ pub fn apply_shared(shared: &SharedState, settings: &Settings) {
     shared
         .include_network_disks
         .store(settings.show_network_disks, Ordering::Relaxed);
+    shared.set_title_metrics(settings.title_metrics);
 }
 
 pub fn apply<R: Runtime>(app: &AppHandle<R>, previous: &Settings, next: &Settings) {
@@ -304,6 +319,12 @@ mod tests {
         Settings {
             title_format: TitleFormatSetting::Compact,
             show_tray_icon: false,
+            title_metrics: TitleMetrics {
+                cpu: true,
+                power: false,
+                memory: true,
+                temperature: true,
+            },
             theme: ThemePreference::Dark,
             reduce_effects: true,
             show_network_disks: true,
@@ -349,6 +370,68 @@ mod tests {
         assert!(!defaults.reduce_effects && !defaults.show_network_disks && !defaults.memory_saver);
         assert_eq!(defaults.theme, ThemePreference::System);
         assert_eq!(defaults.title_format, TitleFormatSetting::Default);
+        assert_eq!(defaults.title_metrics, TitleMetrics::default());
+    }
+
+    fn no_metrics() -> TitleMetrics {
+        TitleMetrics {
+            cpu: false,
+            power: false,
+            memory: false,
+            temperature: false,
+        }
+    }
+
+    #[test]
+    fn legacy_file_without_title_metrics_uses_defaults_without_repair() {
+        let parsed = parse_settings(
+            r#"{"titleFormat":"compact","showTrayIcon":true,"theme":"system","reduceEffects":true,"showNetworkDisks":false,"memorySaver":false}"#,
+        );
+        assert!(!parsed.repaired);
+        assert_eq!(parsed.settings.title_metrics, TitleMetrics::default());
+        assert_eq!(parsed.settings.title_format, TitleFormatSetting::Compact);
+    }
+
+    #[test]
+    fn partial_title_metrics_fill_missing_keys_and_bad_types_are_repaired() {
+        let parsed = parse_settings(r#"{"titleMetrics":{"temperature":true,"power":false}}"#);
+        assert!(!parsed.repaired);
+        assert_eq!(
+            parsed.settings.title_metrics,
+            TitleMetrics {
+                cpu: true,
+                power: false,
+                memory: true,
+                temperature: true,
+            }
+        );
+        let parsed = parse_settings(r#"{"titleMetrics":{"cpu":"yes"}}"#);
+        assert!(parsed.repaired);
+        assert_eq!(parsed.settings.title_metrics, TitleMetrics::default());
+        let parsed = parse_settings(r#"{"titleMetrics":"cpu"}"#);
+        assert!(parsed.repaired);
+        assert_eq!(parsed.settings.title_metrics, TitleMetrics::default());
+    }
+
+    #[test]
+    fn normalized_forces_icon_when_no_metric_is_shown() {
+        let hidden = Settings {
+            show_tray_icon: false,
+            title_metrics: no_metrics(),
+            ..Settings::default()
+        };
+        assert!(hidden.clone().normalized().show_tray_icon);
+        assert_eq!(custom().normalized(), custom());
+        let icon_only = Settings {
+            title_metrics: no_metrics(),
+            ..Settings::default()
+        };
+        assert_eq!(icon_only.clone().normalized(), icon_only);
+        let parsed = parse_settings(
+            r#"{"showTrayIcon":false,"titleMetrics":{"cpu":false,"power":false,"memory":false}}"#,
+        );
+        assert!(parsed.settings.show_tray_icon);
+        assert_eq!(parsed.settings.title_metrics, no_metrics());
     }
 
     #[test]
@@ -435,9 +518,11 @@ mod tests {
         apply_shared(&shared, &custom());
         assert!(shared.compact_title.load(Ordering::Relaxed));
         assert!(shared.include_network_disks.load(Ordering::Relaxed));
+        assert_eq!(shared.title_metrics(), custom().title_metrics);
         apply_shared(&shared, &Settings::default());
         assert!(!shared.compact_title.load(Ordering::Relaxed));
         assert!(!shared.include_network_disks.load(Ordering::Relaxed));
+        assert_eq!(shared.title_metrics(), TitleMetrics::default());
     }
 
     #[test]

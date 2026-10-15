@@ -68,6 +68,11 @@ export interface PowerSample {
   scope: string;
 }
 
+export interface TemperatureSample {
+  celsius: number;
+  source: string;
+}
+
 export interface MemorySample {
   usedBytes: number;
   totalBytes: number;
@@ -107,6 +112,7 @@ export interface Snapshot {
   timestampMs: number;
   cpu: CpuSample;
   power: MetricState<PowerSample>;
+  temperature: MetricState<TemperatureSample>;
   memory: MemorySample;
   disks: DiskSample[];
   network: NetworkSample;
@@ -117,9 +123,17 @@ export type TitleFormat = 'default' | 'compact';
 
 export type ThemePreference = 'system' | 'light' | 'dark';
 
+export interface TitleMetrics {
+  cpu: boolean;
+  power: boolean;
+  memory: boolean;
+  temperature: boolean;
+}
+
 export interface Settings {
   titleFormat: TitleFormat;
   showTrayIcon: boolean;
+  titleMetrics: TitleMetrics;
   theme: ThemePreference;
   reduceEffects: boolean;
   showNetworkDisks: boolean;

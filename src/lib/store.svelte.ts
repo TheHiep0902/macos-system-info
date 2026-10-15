@@ -13,12 +13,13 @@ export type CommandName = (typeof COMMANDS)[keyof typeof COMMANDS];
 export interface History {
   readonly cpu: readonly number[];
   readonly power: readonly number[];
+  readonly temperature: readonly number[];
   readonly memory: readonly number[];
 }
 
 type CallResult<T> = { ok: true; value: T } | { ok: false };
 
-const EMPTY_HISTORY: History = { cpu: [], power: [], memory: [] };
+const EMPTY_HISTORY: History = { cpu: [], power: [], temperature: [], memory: [] };
 
 const DATA_COMMANDS: readonly CommandName[] = [COMMANDS.getSnapshot, COMMANDS.getStaticInfo];
 
@@ -243,6 +244,10 @@ export class PopoverStore {
       memory: appendBounded(base.memory, next.memory.usedPct),
       power:
         next.power.state === 'ok' ? appendBounded(base.power, next.power.smoothedCpuWatts) : [],
+      temperature:
+        next.temperature.state === 'ok'
+          ? appendBounded(base.temperature, next.temperature.celsius)
+          : [],
     };
     this.snapshot = next;
     this.disksChanging = false;

@@ -3,10 +3,11 @@
     label: string;
     hint?: string;
     checked: boolean;
+    disabled?: boolean;
     onchange: (checked: boolean) => void;
   }
 
-  let { label, hint, checked, onchange }: Props = $props();
+  let { label, hint, checked, disabled = false, onchange }: Props = $props();
 
   const uid = $props.id();
 
@@ -18,7 +19,7 @@
   }
 </script>
 
-<div class="setting">
+<div class="setting" class:disabled>
   <div class="text">
     <label for={`${uid}-input`}>{label}</label>
     {#if hint}
@@ -33,6 +34,7 @@
     aria-checked={checked}
     aria-describedby={hint ? `${uid}-hint` : undefined}
     {checked}
+    {disabled}
     onchange={(event) => onchange(event.currentTarget.checked)}
     onkeydown={handleKeydown}
   />
@@ -50,6 +52,10 @@
     display: flex;
     flex-direction: column;
     min-width: 0;
+  }
+
+  .disabled label {
+    color: var(--color-text-secondary);
   }
 
   .hint {
@@ -84,6 +90,10 @@
 
   .switch:checked {
     background: var(--color-accent);
+  }
+
+  .switch:disabled {
+    opacity: var(--opacity-disabled);
   }
 
   .switch:checked::before {

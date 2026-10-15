@@ -22,25 +22,37 @@ Names live in `src/lib/ipc.ts`; payload types in `src/lib/types.ts`.
 | event   | `disks://changed`      | `null`                           | a volume was mounted or unmounted                                         |
 | event   | `popover://visibility` | `PopoverVisibility`              | emitted by Rust on show/hide; `view` requests a view on show              |
 
+Payload fields added in D4:
+
+- `Snapshot.temperature: MetricState<TemperatureSample>` (after `power`), with
+  `TemperatureSample { celsius: number; source: string }`. `source` is `smc:<KEY>` (for example
+  `smc:TC0D` on Intel, `smc:TCMb` on Apple Silicon) or `macmon` (Apple Silicon fallback).
+  `unavailable` carries a Vietnamese reason from Rust (no sensor, VM, Rosetta).
+- `Settings.titleMetrics: TitleMetrics` with `cpu`, `power`, `memory`, `temperature` booleans:
+  which values the menu bar title shows. Default `cpu`, `power`, `memory` on and `temperature` off
+  (the D1 title). Rust `normalized()` forces `showTrayIcon = true` when no title metric is on and the
+  icon is off; the settings view never sends that state (see `SettingsView` below).
+
 ## Source layout
 
-| Path                      | Role                                                                                            |
-| ------------------------- | ----------------------------------------------------------------------------------------------- |
-| `src/main.ts`             | sets the initial `data-theme`, creates the transport and store, mounts `App`, calls `init()`    |
-| `src/App.svelte`          | view switch (`overview` / `cpu-detail` / `settings`), root attributes, Esc, focus restoration   |
-| `src/lib/transport.ts`    | `Transport` interface, the Tauri implementation, mock selection via dynamic import              |
-| `src/lib/store.svelte.ts` | `PopoverStore`: event-driven state, history buffers, settings saves, command failures           |
-| `src/lib/format.ts`       | vi-VN number, byte, MHz, W, uptime and date formatting; source, scope and cluster labels        |
-| `src/lib/thresholds.ts`   | warn / critical thresholds and their text labels                                                |
-| `src/lib/i18n.ts`         | every Vietnamese string, typed keys and typed `{placeholder}` interpolation                     |
-| `src/lib/theme.ts`        | `resolveTheme`, `resolveEffects` and the media queries they follow                              |
-| `src/lib/sparkline.ts`    | polyline points and min / max for the sparkline text equivalent                                 |
-| `src/lib/motion.ts`       | `fadeToken` transition whose duration is read from `--duration-fast`                            |
-| `src/styles/tokens.css`   | non-colour tokens and the reduced-motion override                                               |
-| `src/styles/themes.css`   | colour tokens per theme, increased-contrast overrides, reduced-effects overrides                |
-| `src/styles/base.css`     | reset, focus ring, `.sr-only`, `.selectable`, shared `.metric-*` classes, motion pausing        |
-| `src/mocks/transport.ts`  | mock backend for `pnpm dev:mock` (reachable only through the dynamic import in `transport.ts`)  |
-| `src/mocks/*.json`        | mock fixtures (Apple Silicon and Intel `StaticInfo` / `Snapshot`) and the IPC contract fixtures |
+| Path                       | Role                                                                                            |
+| -------------------------- | ----------------------------------------------------------------------------------------------- |
+| `src/main.ts`              | sets the initial `data-theme`, creates the transport and store, mounts `App`, calls `init()`    |
+| `src/App.svelte`           | view switch (`overview` / `cpu-detail` / `settings`), root attributes, Esc, focus restoration   |
+| `src/lib/transport.ts`     | `Transport` interface, the Tauri implementation, mock selection via dynamic import              |
+| `src/lib/store.svelte.ts`  | `PopoverStore`: event-driven state, history buffers, settings saves, command failures           |
+| `src/lib/format.ts`        | vi-VN number, byte, MHz, W, °C, uptime and date formatting; source, scope and cluster labels    |
+| `src/lib/thresholds.ts`    | warn / critical thresholds and their text labels                                                |
+| `src/lib/title-metrics.ts` | `TITLE_METRIC_KEYS` and `menuBarLocks`, the pure lock rule for the menu bar switches            |
+| `src/lib/i18n.ts`          | every Vietnamese string, typed keys and typed `{placeholder}` interpolation                     |
+| `src/lib/theme.ts`         | `resolveTheme`, `resolveEffects` and the media queries they follow                              |
+| `src/lib/sparkline.ts`     | polyline points and min / max for the sparkline text equivalent                                 |
+| `src/lib/motion.ts`        | `fadeToken` transition whose duration is read from `--duration-fast`                            |
+| `src/styles/tokens.css`    | non-colour tokens and the reduced-motion override                                               |
+| `src/styles/themes.css`    | colour tokens per theme, increased-contrast overrides, reduced-effects overrides                |
+| `src/styles/base.css`      | reset, focus ring, `.sr-only`, `.selectable`, shared `.metric-*` classes, motion pausing        |
+| `src/mocks/transport.ts`   | mock backend for `pnpm dev:mock` (reachable only through the dynamic import in `transport.ts`)  |
+| `src/mocks/*.json`         | mock fixtures (Apple Silicon and Intel `StaticInfo` / `Snapshot`) and the IPC contract fixtures |
 
 Colour literals (`#…`, `rgb(…)`, `rgba(…)`, `hsl(…)`) exist only in `tokens.css` and `themes.css`;
 every other colour, spacing, radius, size, font, duration and easing is a `var(--…)`.
@@ -68,6 +80,7 @@ every other colour, spacing, radius, size, font, duration and easing is a `var(-
 | `--radio-size` / `--radio-dot-size`                           | 14 / 6 px                                                          |
 | `--core-cell-min-width`                                       | 84 px                                                              |
 | `--skeleton-line-height`                                      | 10 px                                                              |
+| `--opacity-disabled`                                          | 0.4; 0.6 under `prefers-contrast: more` (disabled switch control)  |
 | `--duration-fast` / `--duration-base`                         | 120 ms / 200 ms; both `0ms` under `prefers-reduced-motion: reduce` |
 | `--easing-standard`                                           | `cubic-bezier(0.2, 0, 0, 1)`                                       |
 
@@ -110,6 +123,7 @@ every other colour, spacing, radius, size, font, duration and easing is a `var(-
 | `--color-chart-memory`        | `#7b3fc4`                | `#c09cff`                | `#6230a8`                | `#d2b8ff`                |
 | `--color-chart-disk`          | `#08786f`                | `#4dd4c6`                | `#06615a`                | `#7fe3d8`                |
 | `--color-chart-network`       | `#2e7d32`                | `#7bd88f`                | `#236326`                | `#9fe6ad`                |
+| `--color-chart-temperature`   | `#c0267a`                | `#ff85c0`                | `#931656`                | `#ffb0d4`                |
 
 `[data-effects='reduced']` (declared last, so it wins over theme and contrast blocks) sets
 `--color-bg-window` to `--color-bg-solid` and `--color-surface-card` to
@@ -147,9 +161,14 @@ progress fills against the track) need ≥ 3:1.
 | notice (critical) on window                     | 5.05               | 5.55               | 6.06               | 6.38               |
 | chart-cpu / power / memory on card              | 5.05 / 4.04 / 5.74 | 4.43 / 5.49 / 4.82 | 7.30 / 6.33 / 8.26 | 6.79 / 7.80 / 7.25 |
 | chart-disk / network on card                    | 4.90 / 4.70        | 5.90 / 6.16        | 7.23 / 7.18        | 8.36 / 8.67        |
+| chart-temperature on card                       | 5.06               | 4.78               | 8.32               | 7.47               |
 | border-strong on card                           | 3.14               | 3.30               | 7.29               | 6.13               |
 | progress fill normal / warn / critical on track | 4.91 / 5.23 / 5.03 | 3.83 / 4.27 / 3.18 | 6.10 / 6.56 / 6.05 | 5.86 / 6.18 / 5.00 |
 | accent fill (switch on) on track                | 5.41               | 3.38               | 6.43               | 5.36               |
+
+`--color-chart-temperature` is a rose / magenta, kept apart from `--color-status-critical` (red),
+`--color-chart-power` (orange) and `--color-chart-memory` (purple); its ratios were computed with the
+same three-background method and clear the 3:1 chart minimum by a wide margin in every theme.
 
 On the solid reduced-effects background alone, the lowest text ratios are 5.83 (light,
 status-critical on window) and 6.30 (dark, status-critical on card). Native vibrancy can only be
@@ -177,15 +196,16 @@ than 640 px the window stays at 640 and `<main>` scrolls.
 
 ### cards
 
-| Component     | Props                                                                 | Data source                             | States                                                                                                                                                                                                                                                       | Tokens                                                          |
-| ------------- | --------------------------------------------------------------------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------- |
-| `MetricCard`  | `title`, `icon`, `tone`, `busy`, `aside?`, `children`                 | parent card                             | `aria-busy`; `<section aria-labelledby>` with an `<h2>`                                                                                                                                                                                                      | `--color-surface-card`, `--radius-lg`, `--color-chart-*` (icon) |
-| `CpuCard`     | `snapshot`, `staticInfo`, `history`, `onopen`, `buttonRef` (bindable) | `snapshot.cpu`, `store.history.cpu`     | skeleton; frequency loading / unavailable (reason) / `ioReport` average / `nominal` base MHz; cluster MHz when more than one cluster reports it; status label                                                                                                | `--color-accent`, `--color-chart-cpu`, status colours           |
-| `PowerCard`   | `power`, `history`                                                    | `snapshot.power`, `store.history.power` | skeleton (null or `loading`); unavailable → Rust reason + "Không khả dụng"; ok → smoothed W, scope ("CPU" / "Gói CPU"), `SourceBadge`                                                                                                                        | `--color-chart-power`                                           |
-| `MemoryCard`  | `memory`                                                              | `snapshot.memory`                       | skeleton; % + status label, used / total, breakdown (app, wired, compressed, cached, swap)                                                                                                                                                                   | `--color-chart-memory`, status colours                          |
-| `DiskCard`    | `disks`, `changing`                                                   | `snapshot.disks`, `store.disksChanging` | skeleton; `EmptyState` for an empty list; boot volume first; badges Khởi động / Ổ rời / Ổ mạng; status label when ≥ warn; "Khả dụng …" + "Khả dụng gồm dung lượng purgeable" when `availableImportantBytes` is set, else "Còn trống …"; mount / unmount fade | `--color-chart-disk`, `--duration-fast` (via `fadeToken`)       |
-| `NetworkCard` | `network`                                                             | `snapshot.network`                      | skeleton; connected → interface, IPv4, IPv6 (selectable text); "Chưa có địa chỉ IP"; disconnected → `EmptyState` "Không kết nối Wi-Fi" + primary interface if any. SSID is never shown                                                                       | `--color-chart-network`                                         |
-| `UptimeCard`  | `uptimeSecs`, `staticInfo`                                            | `snapshot.uptimeSecs`, `staticInfo`     | skeleton; uptime, boot time, macOS version, model                                                                                                                                                                                                            | `--font-size-lg`                                                |
+| Component         | Props                                                                 | Data source                                         | States                                                                                                                                                                                                                                                                                                                                                                                                                                    | Tokens                                                          |
+| ----------------- | --------------------------------------------------------------------- | --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| `MetricCard`      | `title`, `icon`, `tone`, `busy`, `aside?`, `children`                 | parent card                                         | `aria-busy`; `<section aria-labelledby>` with an `<h2>`; `tone` is `cpu`, `power`, `temperature`, `memory`, `disk`, `network` or `uptime`                                                                                                                                                                                                                                                                                                 | `--color-surface-card`, `--radius-lg`, `--color-chart-*` (icon) |
+| `CpuCard`         | `snapshot`, `staticInfo`, `history`, `onopen`, `buttonRef` (bindable) | `snapshot.cpu`, `store.history.cpu`                 | skeleton; frequency loading / unavailable (reason) / `ioReport` average / `nominal` base MHz; cluster MHz when more than one cluster reports it; status label                                                                                                                                                                                                                                                                             | `--color-accent`, `--color-chart-cpu`, status colours           |
+| `PowerCard`       | `power`, `history`                                                    | `snapshot.power`, `store.history.power`             | skeleton (null or `loading`); unavailable → Rust reason + "Không khả dụng"; ok → smoothed W, scope ("CPU" / "Gói CPU"), `SourceBadge`                                                                                                                                                                                                                                                                                                     | `--color-chart-power`                                           |
+| `TemperatureCard` | `temperature`, `history`                                              | `snapshot.temperature`, `store.history.temperature` | placed right after `PowerCard`; skeleton "Đang đo nhiệt độ…" (null or `loading`); unavailable → Rust reason + "Không khả dụng"; ok → whole °C (`formatCelsius`), `StatusLabel` from `statusFor('temperature', celsius)` (warn 80 °C, critical 95 °C), `SourceBadge` ("SMC · {key}" or "macmon"), sparkline on a 0–100 °C scale (raised to the highest value in the history when a reading exceeds 100 °C) + `.sr-only` min / max sentence | `--color-chart-temperature`, status colours                     |
+| `MemoryCard`      | `memory`                                                              | `snapshot.memory`                                   | skeleton; % + status label, used / total, breakdown (app, wired, compressed, cached, swap)                                                                                                                                                                                                                                                                                                                                                | `--color-chart-memory`, status colours                          |
+| `DiskCard`        | `disks`, `changing`                                                   | `snapshot.disks`, `store.disksChanging`             | skeleton; `EmptyState` for an empty list; boot volume first; badges Khởi động / Ổ rời / Ổ mạng; status label when ≥ warn; "Khả dụng …" + "Khả dụng gồm dung lượng purgeable" when `availableImportantBytes` is set, else "Còn trống …"; mount / unmount fade                                                                                                                                                                              | `--color-chart-disk`, `--duration-fast` (via `fadeToken`)       |
+| `NetworkCard`     | `network`                                                             | `snapshot.network`                                  | skeleton; connected → interface, IPv4, IPv6 (selectable text); "Chưa có địa chỉ IP"; disconnected → `EmptyState` "Không kết nối Wi-Fi" + primary interface if any. SSID is never shown                                                                                                                                                                                                                                                    | `--color-chart-network`                                         |
+| `UptimeCard`      | `uptimeSecs`, `staticInfo`                                            | `snapshot.uptimeSecs`, `staticInfo`                 | skeleton; uptime, boot time, macOS version, model                                                                                                                                                                                                                                                                                                                                                                                         | `--font-size-lg`                                                |
 
 ### cpu
 
@@ -202,25 +222,45 @@ Silicon cells "Lõi {id}".
 
 ### primitives
 
-| Component     | Props                                                      | Notes                                                                                                                                 | Tokens                                                                                                    |
-| ------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `ProgressBar` | `value` (0–100), `label`, `valueText?`, `status?`, `size?` | `role="progressbar"`, `aria-valuenow/min/max`, `aria-label`, `aria-valuetext`; fill width is a `scaleX` set through `style:transform` | `--progress-height(-sm)`, `--color-surface-track`, status colours, `--duration-fast`, `--easing-standard` |
-| `Sparkline`   | `values`, `tone`, `capacity?` (60), `max?`                 | plain SVG `<polyline>`, right-aligned, `aria-hidden`; callers render a `.sr-only` min / max sentence next to it                       | `--sparkline-height`, `--sparkline-stroke`, `--color-chart-*`                                             |
-| `StatusDot`   | `status`                                                   | decorative (`aria-hidden`); always paired with text                                                                                   | `--status-dot-size`, status colours                                                                       |
-| `StatusLabel` | `status`                                                   | dot + "Bình thường" / "Cao" / "Rất cao" / "Không khả dụng"                                                                            | status colours                                                                                            |
-| `Badge`       | `tone?`, `children`                                        | neutral / accent / warn / critical pill                                                                                               | `--color-surface-badge/-accent/-warn/-critical`, `--color-text-badge-*`                                   |
-| `EmptyState`  | `title`, `description?`, `icon?`, `tone?`                  | empty lists, no Wi-Fi, settings load error                                                                                            | `--color-text-secondary/-tertiary`, `--color-status-critical`                                             |
-| `Skeleton`    | `lines?`, `label?`                                         | static placeholder bars (no shimmer animation) + `.sr-only` label                                                                     | `--color-surface-skeleton`, `--skeleton-line-height`                                                      |
-| `IconButton`  | `label`, `icon`, `onclick`, `disabled?`, `ref` (bindable)  | native `<button>`, `aria-label` and `title` from `label`                                                                              | `--control-size`, `--icon-size-md`, `--color-surface-hover/-active`                                       |
-| `SourceBadge` | `source`                                                   | `ioreport`/`ioReport` → "IOReport", `smc:PCPT` → "SMC · PCPT", `nominal` → "Danh định"; `.sr-only` "Nguồn số liệu:" prefix            | `--color-border-subtle`, `--color-text-tertiary`                                                          |
+| Component     | Props                                                      | Notes                                                                                                                                                                                                                             | Tokens                                                                                                    |
+| ------------- | ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `ProgressBar` | `value` (0–100), `label`, `valueText?`, `status?`, `size?` | `role="progressbar"`, `aria-valuenow/min/max`, `aria-label`, `aria-valuetext`; fill width is a `scaleX` set through `style:transform`                                                                                             | `--progress-height(-sm)`, `--color-surface-track`, status colours, `--duration-fast`, `--easing-standard` |
+| `Sparkline`   | `values`, `tone`, `capacity?` (60), `max?`                 | plain SVG `<polyline>`, right-aligned, `aria-hidden`; callers render a `.sr-only` min / max sentence next to it; `tone` is `cpu`, `power`, `temperature` or `memory`                                                              | `--sparkline-height`, `--sparkline-stroke`, `--color-chart-*`                                             |
+| `StatusDot`   | `status`                                                   | decorative (`aria-hidden`); always paired with text                                                                                                                                                                               | `--status-dot-size`, status colours                                                                       |
+| `StatusLabel` | `status`                                                   | dot + "Bình thường" / "Cao" / "Rất cao" / "Không khả dụng"                                                                                                                                                                        | status colours                                                                                            |
+| `Badge`       | `tone?`, `children`                                        | neutral / accent / warn / critical pill                                                                                                                                                                                           | `--color-surface-badge/-accent/-warn/-critical`, `--color-text-badge-*`                                   |
+| `EmptyState`  | `title`, `description?`, `icon?`, `tone?`                  | empty lists, no Wi-Fi, settings load error                                                                                                                                                                                        | `--color-text-secondary/-tertiary`, `--color-status-critical`                                             |
+| `Skeleton`    | `lines?`, `label?`                                         | static placeholder bars (no shimmer animation) + `.sr-only` label                                                                                                                                                                 | `--color-surface-skeleton`, `--skeleton-line-height`                                                      |
+| `IconButton`  | `label`, `icon`, `onclick`, `disabled?`, `ref` (bindable)  | native `<button>`, `aria-label` and `title` from `label`                                                                                                                                                                          | `--control-size`, `--icon-size-md`, `--color-surface-hover/-active`                                       |
+| `SourceBadge` | `source`                                                   | `ioreport`/`ioReport` → "IOReport", `smc:<KEY>` → "SMC · <KEY>" with the key's case kept (`smc:PCPT` → "SMC · PCPT", `smc:TCMb` → "SMC · TCMb"), `nominal` → "Danh định", `macmon` → "macmon"; `.sr-only` "Nguồn số liệu:" prefix | `--color-border-subtle`, `--color-text-tertiary`                                                          |
 
 ### settings
 
-| Component           | Props                                                                                                               | Notes                                                                                                                                                                                                                             |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SettingsView`      | `settings`, `saving`, `saveFailed`, `loadFailed`, `notice`, `onheightchange`, `onchange(patch)`, `onback`, `onquit` | sections Thanh menu / Giao diện / Ổ đĩa / Hệ thống; skeleton while `settings` is null, `EmptyState` if `get_settings` failed; "Đang lưu…" in a `role="status"` line; inline `role="alert"` error after a failed save; quit button |
-| `SettingSwitch`     | `label`, `hint?`, `checked`, `onchange(checked)`                                                                    | native `<input type="checkbox" role="switch" aria-checked>` with a `<label for>`; hint linked by `aria-describedby`; Enter toggles too                                                                                            |
-| `SettingRadioGroup` | `legend`, `name`, `value`, `options`, `onchange(value)` (generic over the option type)                              | `<fieldset>` + `<legend>` + native radios (arrow keys move the selection)                                                                                                                                                         |
+| Component           | Props                                                                                                               | Notes                                                                                                                                                                                                                                                                                                                     |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SettingsView`      | `settings`, `saving`, `saveFailed`, `loadFailed`, `notice`, `onheightchange`, `onchange(patch)`, `onback`, `onquit` | sections Thanh menu / Giao diện / Ổ đĩa / Hệ thống; skeleton while `settings` is null, `EmptyState` if `get_settings` failed; "Đang lưu…" in a `role="status"` line; inline `role="alert"` error after a failed save; quit button                                                                                         |
+| `SettingSwitch`     | `label`, `hint?`, `checked`, `disabled?`, `onchange(checked)`                                                       | native `<input type="checkbox" role="switch" aria-checked>` with a `<label for>`; hint linked by `aria-describedby`; Enter toggles too; `disabled` sets the native attribute (announced as dimmed, skipped by Tab, no handler runs), dims the control with `--opacity-disabled` and the label to `--color-text-secondary` |
+| `SettingRadioGroup` | `legend`, `name`, `value`, `options`, `onchange(value)` (generic over the option type)                              | `<fieldset>` + `<legend>` + native radios (arrow keys move the selection)                                                                                                                                                                                                                                                 |
+
+The "Thanh menu" section holds, in order: the "Kiểu tiêu đề" radio group; a `role="group"` labelled
+"Chỉ số trên thanh menu" (a plain `<div>` with `aria-labelledby`, not a `<fieldset>`, so the known
+first-render spacing issue of `SettingRadioGroup` cannot spread to it) with four indented switches
+"Mức dùng CPU", "Công suất CPU", "Mức dùng RAM", "Nhiệt độ CPU" bound to `settings.titleMetrics`; and
+the "Hiện biểu tượng" switch. A metric switch sends a patch with the whole `titleMetrics` object
+(current values plus the toggled key), so the store still saves the whole `Settings` object.
+
+Lock rule (`menuBarLocks` in `src/lib/title-metrics.ts`, unit-tested over all 32 combinations): the
+menu bar must always show at least one title metric or the icon.
+
+- Exactly one metric on and the icon off → that metric's switch is `disabled`.
+- No metric on and the icon on → the icon switch is `disabled`.
+- Otherwise nothing is disabled. The state "no metric and icon off" never comes from Rust
+  (`normalized()`); if it ever did, nothing is locked so the user can turn the icon back on.
+
+At most one switch is locked at a time, and from any state Rust can send a switch never locks itself
+as a result of its own toggle, so focus is never lost. The locked switch shows the hint "Thanh menu
+cần ít nhất một chỉ số hoặc biểu tượng" under its label through the existing `hint` prop, which
+links it with `aria-describedby`.
 
 ## State, theming and accessibility
 
@@ -238,15 +278,17 @@ Silicon cells "Lõi {id}".
    `visible = false`; nothing is invoked.
 4. Every `metrics://snapshot` sets `visible = true` (self-heal after a missed visibility event) and is
    applied only if it is newer (`seq` or `timestampMs` greater) than the current snapshot.
-5. History: ring buffers of the last 60 values for CPU %, RAM % and smoothed W. A buffer restarts
+5. History: ring buffers of the last 60 values for CPU %, RAM %, smoothed W and °C. A buffer restarts
    when `seq` does not advance by exactly 1 or the timestamp gap is negative or above 10 s. The power
-   buffer is emptied while power is not `ok`.
+   buffer is emptied while power is not `ok`, and the temperature buffer while temperature is not
+   `ok`.
 6. `disks://changed` sets `disksChanging` until the next applied snapshot; `DiskCard` exposes it as
    `aria-busy` plus a polite status line, and new / removed rows fade with `--duration-fast`.
 7. `setView('cpu-detail')` sends `set_detail_enabled(true)`; leaving it sends `false`.
 8. `updateSettings(patch)` applies the patch locally at once, then queues `set_settings({ settings })`
-   with the full object; saves run one at a time. Success replaces local settings with the value Rust
-   returns; failure restores the last confirmed value and sets `settingsError`.
+   with the full object (including the whole `titleMetrics`); saves run one at a time. Success
+   replaces local settings with the value Rust returns; failure restores the last confirmed value and
+   sets `settingsError`.
 9. Every invoke is wrapped: failures never reject, they are logged once per failure streak with
    `console.warn('[pulsebar] <command> failed: <message>')` (message truncated to 200 chars, no
    arguments logged) and recorded in `failures`. `dataFailed` (snapshot / static info / listener
@@ -269,13 +311,13 @@ Silicon cells "Lõi {id}".
 
 ### Keyboard map
 
-| Key                                   | Effect                                                                                                 |
-| ------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| Tab / Shift+Tab                       | moves through "Chi tiết", footer settings / quit, back buttons, settings controls                      |
-| Enter / Space                         | activates buttons; Space toggles switches and Enter toggles them too                                   |
-| Arrow keys                            | change the selected radio inside a radio group                                                         |
-| ↑ / ↓, PgUp / PgDn, Home / End, Space | scroll the content area when focus is not in a form control (Space only when focus is not on a button) |
-| Esc                                   | `hide_popover` from any view                                                                           |
+| Key                                   | Effect                                                                                                           |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Tab / Shift+Tab                       | moves through "Chi tiết", footer settings / quit, back buttons, settings controls (a disabled switch is skipped) |
+| Enter / Space                         | activates buttons; Space toggles switches and Enter toggles them too                                             |
+| Arrow keys                            | change the selected radio inside a radio group                                                                   |
+| ↑ / ↓, PgUp / PgDn, Home / End, Space | scroll the content area when focus is not in a form control (Space only when focus is not on a button)           |
+| Esc                                   | `hide_popover` from any view                                                                                     |
 
 Focus: entering CPU detail or settings focuses the back button; returning to the overview focuses
 the control that opened the view ("Chi tiết" or the settings button). The focus ring is
@@ -294,6 +336,8 @@ card opens the detail view while the accessible control stays a real `<button>`.
 - Status is never colour alone: every warn / critical colour is paired with "Cao" / "Rất cao" text
   (or included in `aria-valuetext` for core cells).
 - `IconButton` always has an `aria-label`; icons are `aria-hidden`.
+- The menu bar metric switches sit in a `role="group"` named "Chỉ số trên thanh menu"; a locked switch
+  uses the native `disabled` attribute and is described by the visible hint.
 - Live regions: notice banner and settings save error are `role="alert"`; settings saving and disk
   updates are `role="status"`.
 
@@ -320,8 +364,9 @@ removed and neither the mock module nor its JSON is emitted (`grep -r "i9-9880H"
 | `view`          | `overview` (default), `cpu-detail`, `settings` | initial view                                                                                                                    |
 | `wifi`          | `off`                                          | Wi-Fi disconnected                                                                                                              |
 | `power`         | `unavailable`                                  | power `unavailable` with the VM reason                                                                                          |
+| `temperature`   | `unavailable`                                  | temperature `unavailable` with "Model Mac này không cung cấp cảm biến nhiệt độ CPU"                                             |
 | `state`         | `loading`                                      | `get_static_info` / `get_snapshot` return `null`, no snapshots are pushed (skeletons)                                           |
-| `rosetta`       | `on`                                           | `translated: true`; power and frequency unavailable with the Rosetta reason                                                     |
+| `rosetta`       | `on`                                           | `translated: true`; power, frequency and temperature unavailable with the Rosetta reason (wins over `temperature`)              |
 
 Unknown values fall back to the defaults. Example:
 `http://localhost:1420/?platform=intel&theme=dark&view=cpu-detail`.
@@ -331,13 +376,16 @@ Data sets (`src/mocks/*.json`, type-checked against `StaticInfo` / `Snapshot` in
 
 - `static-apple-silicon.json` / `snapshot-apple-silicon.json`: Apple M3 Pro, clusters E (CPUs 0–5)
   and P (CPUs 6–11) with per-core MHz, 36 GB RAM, disks Macintosh HD (boot, purgeable figure),
-  SANDISK (removable, warn level) and "Chia sẻ" (SMB share), Wi-Fi with IPv4 and IPv6.
+  SANDISK (removable, warn level) and "Chia sẻ" (SMB share), Wi-Fi with IPv4 and IPv6, temperature
+  52.5 °C from `smc:TCMb`.
 - `static-intel.json` / `snapshot-intel.json`: Intel i9-9880H, one "CPU" cluster of 16 logical
   CPUs, nominal 2 300 MHz / max 4 800 MHz, speed limit 100 %, 32 GB RAM at warn level, disks
-  Macintosh HD (warn) and Backup (removable, critical), Wi-Fi IPv4 only.
+  Macintosh HD (warn) and Backup (removable, critical), Wi-Fi IPv4 only, temperature 71 °C from
+  `smc:TCXC`.
 
 Behaviour: the first `get_snapshot` replays 59 historical snapshots (2 s apart, consecutive `seq`)
 so sparklines start full, then a self-rescheduling `setTimeout` pushes a jittered snapshot every
-2 s while a snapshot listener exists. `cpu.cores` is filled only after `set_detail_enabled(true)`,
-network shares appear only when "Hiện ổ mạng" is on (toggling it emits `disks://changed`), and
-`hide_popover`, `resize_popover` and `quit_app` are no-ops.
+2 s while a snapshot listener exists. Each new snapshot jitters the temperature by up to ±3 °C
+around the fixture value, clamped to 30–100 °C. `cpu.cores` is filled only after
+`set_detail_enabled(true)`, network shares appear only when "Hiện ổ mạng" is on (toggling it emits
+`disks://changed`), and `hide_popover`, `resize_popover` and `quit_app` are no-ops.

@@ -5,6 +5,7 @@
   import MemoryCard from './components/cards/MemoryCard.svelte';
   import NetworkCard from './components/cards/NetworkCard.svelte';
   import PowerCard from './components/cards/PowerCard.svelte';
+  import TemperatureCard from './components/cards/TemperatureCard.svelte';
   import UptimeCard from './components/cards/UptimeCard.svelte';
   import CpuDetailView from './components/cpu/CpuDetailView.svelte';
   import Footer from './components/layout/Footer.svelte';
@@ -133,6 +134,10 @@
       onopen={() => void navigate('cpu-detail')}
     />
     <PowerCard power={store.snapshot?.power ?? null} history={store.history.power} />
+    <TemperatureCard
+      temperature={store.snapshot?.temperature ?? null}
+      history={store.history.temperature}
+    />
     <MemoryCard memory={store.snapshot?.memory ?? null} />
     <DiskCard disks={store.snapshot?.disks ?? null} changing={store.disksChanging} />
     <NetworkCard network={store.snapshot?.network ?? null} />

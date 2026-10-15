@@ -8,6 +8,7 @@ import type {
   Settings,
   Snapshot,
   StaticInfo,
+  TemperatureSample,
 } from '../lib/types';
 import appleSnapshotJson from './snapshot-apple-silicon.json';
 import appleStaticJson from './static-apple-silicon.json';
@@ -20,6 +21,7 @@ export interface MockScenario {
   view: PopoverView;
   wifi: boolean;
   powerUnavailable: boolean;
+  temperatureUnavailable: boolean;
   loading: boolean;
   rosetta: boolean;
 }
@@ -27,12 +29,17 @@ export interface MockScenario {
 const TICK_MS = 2000;
 const HISTORY_POINTS = 60;
 const POWER_UNAVAILABLE_REASON = 'Máy ảo không cung cấp cảm biến công suất';
+const TEMPERATURE_UNAVAILABLE_REASON = 'Model Mac này không cung cấp cảm biến nhiệt độ CPU';
+const TEMPERATURE_SPREAD = 3;
+const TEMPERATURE_MIN = 30;
+const TEMPERATURE_MAX = 100;
 const ROSETTA_REASON = 'Đang chạy qua Rosetta – hãy mở bản native';
 const VIEWS: readonly PopoverView[] = ['overview', 'cpu-detail', 'settings'];
 
 const DEFAULT_SETTINGS: Settings = {
   titleFormat: 'default',
   showTrayIcon: true,
+  titleMetrics: { cpu: true, power: true, memory: true, temperature: false },
   theme: 'system',
   reduceEffects: false,
   showNetworkDisks: false,
@@ -51,6 +58,7 @@ export function parseScenario(params: URLSearchParams): MockScenario {
     view: pick(params.get('view'), VIEWS) ?? 'overview',
     wifi: params.get('wifi') !== 'off',
     powerUnavailable: params.get('power') === 'unavailable',
+    temperatureUnavailable: params.get('temperature') === 'unavailable',
     loading: params.get('state') === 'loading',
     rosetta: params.get('rosetta') === 'on',
   };
@@ -78,6 +86,7 @@ class MockBackend {
   readonly #handlers = new Map<string, Set<(payload: unknown) => void>>();
   #settings: Settings;
   #current: Snapshot;
+  readonly #temperatureBase: number | null;
   #detail = false;
   #seeded = false;
   #timer: ReturnType<typeof setTimeout> | null = null;
@@ -88,7 +97,10 @@ class MockBackend {
     const staticInfo = (apple ? appleStaticJson : intelStaticJson) as StaticInfo;
     this.#staticInfo = { ...staticInfo, translated: scenario.rosetta };
     this.#settings = { ...DEFAULT_SETTINGS, theme: scenario.theme ?? DEFAULT_SETTINGS.theme };
-    this.#current = this.#decorate((apple ? appleSnapshotJson : intelSnapshotJson) as Snapshot);
+    const snapshot = (apple ? appleSnapshotJson : intelSnapshotJson) as Snapshot;
+    this.#temperatureBase =
+      snapshot.temperature.state === 'ok' ? snapshot.temperature.celsius : null;
+    this.#current = this.#decorate(snapshot);
   }
 
   readonly transport: Transport = {
@@ -203,6 +215,11 @@ class MockBackend {
       : this.#scenario.powerUnavailable
         ? { state: 'unavailable', reason: POWER_UNAVAILABLE_REASON }
         : snapshot.power;
+    const temperature: Snapshot['temperature'] = this.#scenario.rosetta
+      ? { state: 'unavailable', reason: ROSETTA_REASON }
+      : this.#scenario.temperatureUnavailable
+        ? { state: 'unavailable', reason: TEMPERATURE_UNAVAILABLE_REASON }
+        : snapshot.temperature;
     const frequency: Snapshot['cpu']['frequency'] = this.#scenario.rosetta
       ? { state: 'unavailable', reason: ROSETTA_REASON }
       : snapshot.cpu.frequency;
@@ -215,7 +232,7 @@ class MockBackend {
           isWifiConnected: false,
           primaryInterface: null,
         };
-    return { ...snapshot, power, network, cpu: { ...snapshot.cpu, frequency } };
+    return { ...snapshot, power, temperature, network, cpu: { ...snapshot.cpu, frequency } };
   }
 
   #next(previous: Snapshot, timestampMs: number): Snapshot {
@@ -255,6 +272,10 @@ class MockBackend {
         : previous.cpu.frequency;
     const power: Snapshot['power'] =
       previous.power.state === 'ok' ? this.#nextPower(previous.power) : previous.power;
+    const temperature: Snapshot['temperature'] =
+      previous.temperature.state === 'ok'
+        ? this.#nextTemperature(previous.temperature)
+        : previous.temperature;
     const usedPct = jitter(previous.memory.usedPct, 0.6, 20, 98);
     const usedBytes = Math.round((previous.memory.totalBytes * usedPct) / 100);
     return {
@@ -269,6 +290,7 @@ class MockBackend {
         cores,
       },
       power,
+      temperature,
       memory: {
         ...previous.memory,
         usedPct,
@@ -288,6 +310,15 @@ class MockBackend {
       state: 'ok',
       cpuWatts,
       smoothedCpuWatts: round2(power.smoothedCpuWatts * 0.7 + cpuWatts * 0.3),
+    };
+  }
+
+  #nextTemperature(temperature: TemperatureSample): Snapshot['temperature'] {
+    const base = this.#temperatureBase ?? temperature.celsius;
+    return {
+      ...temperature,
+      state: 'ok',
+      celsius: jitter(base, TEMPERATURE_SPREAD, TEMPERATURE_MIN, TEMPERATURE_MAX),
     };
   }
 

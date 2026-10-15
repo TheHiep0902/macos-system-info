@@ -1,10 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { COMMANDS, EVENTS } from '../lib/ipc';
 import type { Snapshot, StaticInfo } from '../lib/types';
 import appleSnapshot from './snapshot-apple-silicon.json';
 import intelSnapshot from './snapshot-intel.json';
 import appleStatic from './static-apple-silicon.json';
 import intelStatic from './static-intel.json';
-import { parseScenario } from './transport';
+import { createMockTransport, parseScenario } from './transport';
 
 type JsonShape<T> = T extends string
   ? string
@@ -29,12 +30,17 @@ const typedFixtures = {
 
 const FREQUENCY_STATES = ['ok', 'unavailable', 'loading'];
 const FREQ_SOURCES = ['ioReport', 'nominal'];
+const TEMPERATURE_SOURCE = /^(smc:[A-Za-z0-9]{4}|macmon)$/;
 
 function expectSnapshotLiterals(snapshot: JsonShape<Snapshot>): void {
   expect(FREQUENCY_STATES).toContain(snapshot.cpu.frequency.state);
   expect(FREQUENCY_STATES).toContain(snapshot.power.state);
+  expect(FREQUENCY_STATES).toContain(snapshot.temperature.state);
   if ('source' in snapshot.cpu.frequency) {
     expect(FREQ_SOURCES).toContain(snapshot.cpu.frequency.source);
+  }
+  if ('source' in snapshot.temperature) {
+    expect(snapshot.temperature.source).toMatch(TEMPERATURE_SOURCE);
   }
 }
 
@@ -58,6 +64,7 @@ describe('mock fixtures', () => {
       perCoreAvailable: true,
     });
     expect(snapshot.power).toMatchObject({ state: 'ok', source: 'ioreport', scope: 'cpu' });
+    expect(snapshot.temperature).toEqual({ state: 'ok', celsius: 52.5, source: 'smc:TCMb' });
     expectSnapshotLiterals(snapshot);
   });
 
@@ -79,6 +86,7 @@ describe('mock fixtures', () => {
       speedLimitPct: 100,
     });
     expect(snapshot.power).toMatchObject({ state: 'ok', source: 'smc:PCPT', scope: 'package' });
+    expect(snapshot.temperature).toEqual({ state: 'ok', celsius: 71, source: 'smc:TCXC' });
     expectSnapshotLiterals(snapshot);
   });
 
@@ -95,7 +103,7 @@ describe('parseScenario', () => {
   it('reads every supported query parameter', () => {
     const scenario = parseScenario(
       new URLSearchParams(
-        'platform=intel&theme=dark&view=cpu-detail&wifi=off&power=unavailable&state=loading&rosetta=on',
+        'platform=intel&theme=dark&view=cpu-detail&wifi=off&power=unavailable&temperature=unavailable&state=loading&rosetta=on',
       ),
     );
     expect(scenario).toEqual({
@@ -104,20 +112,74 @@ describe('parseScenario', () => {
       view: 'cpu-detail',
       wifi: false,
       powerUnavailable: true,
+      temperatureUnavailable: true,
       loading: true,
       rosetta: true,
     });
   });
 
   it('falls back to defaults for unknown values', () => {
-    expect(parseScenario(new URLSearchParams('platform=arm&theme=blue&view=../x'))).toEqual({
+    expect(
+      parseScenario(new URLSearchParams('platform=arm&theme=blue&view=../x&temperature=off')),
+    ).toEqual({
       platform: 'apple',
       theme: null,
       view: 'overview',
       wifi: true,
       powerUnavailable: false,
+      temperatureUnavailable: false,
       loading: false,
       rosetta: false,
     });
+  });
+});
+
+describe('mock backend temperature', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  async function seededSnapshots(query: string): Promise<Snapshot[]> {
+    vi.useFakeTimers();
+    const { transport } = createMockTransport(new URLSearchParams(query));
+    const pushed: Snapshot[] = [];
+    const unlisten = await transport.listen<Snapshot>(EVENTS.snapshot, (snapshot) => {
+      pushed.push(snapshot);
+    });
+    const latest = await transport.invoke<Snapshot>(COMMANDS.getSnapshot);
+    unlisten();
+    expect(vi.getTimerCount()).toBe(0);
+    return [...pushed, latest];
+  }
+
+  it('reports the missing-sensor reason for temperature=unavailable', async () => {
+    const snapshots = await seededSnapshots('temperature=unavailable');
+    for (const snapshot of snapshots) {
+      expect(snapshot.temperature).toEqual({
+        state: 'unavailable',
+        reason: 'Model Mac này không cung cấp cảm biến nhiệt độ CPU',
+      });
+    }
+  });
+
+  it('reports the Rosetta reason for temperature, power and frequency under Rosetta', async () => {
+    const reason = 'Đang chạy qua Rosetta – hãy mở bản native';
+    const [snapshot] = await seededSnapshots('platform=intel&rosetta=on&temperature=unavailable');
+    expect(snapshot?.temperature).toEqual({ state: 'unavailable', reason });
+    expect(snapshot?.power).toEqual({ state: 'unavailable', reason });
+    expect(snapshot?.cpu.frequency).toEqual({ state: 'unavailable', reason });
+  });
+
+  it.each([
+    [0, 49.5],
+    [1, 55.5],
+  ])('jitters around the fixture value (random %s gives %s °C)', async (random, celsius) => {
+    vi.spyOn(Math, 'random').mockReturnValue(random);
+    const snapshots = await seededSnapshots('platform=apple');
+    expect(snapshots).toHaveLength(61);
+    for (const snapshot of snapshots.slice(1)) {
+      expect(snapshot.temperature).toEqual({ state: 'ok', celsius, source: 'smc:TCMb' });
+    }
   });
 });

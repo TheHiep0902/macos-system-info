@@ -30,6 +30,16 @@ describe('statusFor', () => {
     expect(statusFor('disk', value)).toBe(expected);
   });
 
+  it.each([
+    [79.9, 'normal'],
+    [80, 'warn'],
+    [94.9, 'warn'],
+    [95, 'critical'],
+    [110, 'critical'],
+  ] as const)('temperature %s °C is %s', (value, expected) => {
+    expect(statusFor('temperature', value)).toBe(expected);
+  });
+
   it('treats non-finite values as unavailable', () => {
     expect(statusFor('cpu', Number.NaN)).toBe('unavailable');
   });

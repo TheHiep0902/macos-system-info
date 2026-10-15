@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import fixture from '../mocks/contract-snapshot.json';
-import type { FrequencySample, MetricState, PowerSample, Snapshot, StaticInfo } from './types';
+import type {
+  FrequencySample,
+  MetricState,
+  PowerSample,
+  Snapshot,
+  StaticInfo,
+  TemperatureSample,
+} from './types';
 
 interface ContractFixture {
   staticInfo: StaticInfo;
@@ -8,6 +15,7 @@ interface ContractFixture {
   powerUnavailable: MetricState<PowerSample>;
   frequencyLoading: MetricState<FrequencySample>;
   frequencyNominal: MetricState<FrequencySample>;
+  temperatureUnavailable: MetricState<TemperatureSample>;
 }
 
 const typed = {
@@ -62,6 +70,7 @@ const typed = {
       source: 'ioreport',
       scope: 'cpu',
     },
+    temperature: { state: 'ok', celsius: 54.5, source: 'smc:TCMb' },
     memory: {
       usedBytes: 23773642752,
       totalBytes: 38654705664,
@@ -110,6 +119,10 @@ const typed = {
     maxMhz: null,
     perCoreAvailable: false,
     speedLimitPct: 100,
+  },
+  temperatureUnavailable: {
+    state: 'unavailable',
+    reason: 'Model Mac này không cung cấp cảm biến nhiệt độ CPU',
   },
 } satisfies ContractFixture;
 

@@ -105,13 +105,115 @@ item (the same region appears in Finder) and about 10 MB is `IOAccelerator` grap
 pre-created popover window's surfaces. The open-state CPU was sampled only while the popover was
 visible (it was dismissed after 213 s by user interaction).
 
+### On-screen checks of the real popover (V0)
+
+Date: 2026-10-15 (no code change). Release x86_64 rebuilt from a clean `main` at `ed7b7d0`
+(`pnpm tauri build --target x86_64-apple-darwin --bundles app`), plus a debug x86_64 build for the CSP
+check (`--debug`). One display, 1920×1080 at 1x, macOS 14.8.9, dark appearance, the owner's settings
+(compact title, "Giảm hiệu ứng" on). No computer-use tool was available, so the checks were automated
+with small Swift helpers: `CGWindowListCopyWindowInfo` for window bounds (layer 25 = status item,
+5 = popover, 101 = context menu), CGEvent mouse clicks and key presses (no typed text),
+`screencapture` for pixels, `NSWorkspace.frontmostApplication` for focus and the app's debug log.
+Permissions (Accessibility, Screen Recording, event posting) were only read, never requested.
+
+| #   | Check                                    | Method                                                                                                                  | Result                                                                                                                                                                                                                                                                      |
+| --- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Popover under the icon                   | `CGWindowList` bounds of the status item and the popover                                                                | Pass: icon x = 1149, w = 139 (centre 1218.5); popover x = 1039, w = 360 (centre 1219); top y = 29 (menu bar 24 + gap). Second display with another scale: **chưa kiểm chứng** (single display)                                                                              |
+| 2   | Left-click toggle and 200 ms debounce    | CGEvent clicks; blur with `open -a Finder`; one click fired from a log watcher                                          | Pass: click while open → `popover hidden`, focus back to the previous app; click again → shown. A click 31 ms after blur logs `tray click ignored right after the popover lost focus` and the popover stays hidden; a click 265 ms after blur reopens it                    |
+| 3   | Esc, immediate reopen, focus return      | CGEvent Esc; frontmost app before and after                                                                             | Pass: Esc hides the popover and the previous app (Claude) becomes frontmost; clicks 313 ms and 1.3 s after Esc reopen it with Pulsebar frontmost                                                                                                                            |
+| 4   | Top edge fixed while resizing            | window bounds while switching views                                                                                     | Pass: overview → settings height 640 → 566, CPU detail 418; y stays 29, x unchanged                                                                                                                                                                                         |
+| 5   | 12 px corners, theme on the material     | `screencapture -l <window> -o` (alpha); radius from transparent coverage r = √(n / (1 − π/4)) over a 24 px corner block | Pass: effects reduced r ≈ 12.0 px on all 4 corners; native material r ≈ 11.5 px (material mask, ±0.5 px antialiasing). Light / Dark / System switch instantly on the material                                                                                               |
+| 6   | Right-click menu                         | screenshot of the menu                                                                                                  | Pass: Mở Pulsebar · Khởi động cùng macOS (unchecked = off) · Cài đặt… · separator · Thoát. "Cài đặt…" opens the popover on the settings view; "Thoát" quits                                                                                                                 |
+| 7   | Disk card within 2 s of `hdiutil attach` | 20 MB APFS test DMG; frame diff of the card region against a 20 ms `mount` poller                                       | Pass: "PulsebarV0 · Ổ rời" appears ≤ 1.58 s after the volume mounted (another run ≤ 0.45 s after the command); removed ≤ 0.35 s after unmount                                                                                                                               |
+| 8   | CSP inside WKWebView                     | debug build, popover right-click → Inspect Element; Network and Console after "Reload"                                  | Pass: the document response carries `Content-Security-Policy: script-src 'self' 'sha256-…'; style-src 'self'; default-src 'self' ipc: http://ipc.localhost; img-src 'self' data:`; console empty after reload and overview → CPU detail → settings                          |
+| 9   | Memory saver                             | memory saver on, popover hidden, watched for 320 s, then clicked                                                        | Pass (functional): after 5 min the log shows `popover window released by memory saver` and the "Pulsebar Web Content" process exits; the next click creates a new window and Web Content process and shows it in place. See known issue F1                                  |
+| 10  | Monospaced digits in the title           | AX title of the status item and its width every 200 ms, idle and with `yes` × 8                                         | Pass: 39 distinct titles; width constant per string shape (139 pt for `XX%  XXW XX%`, 135 pt for `XX% X.XW XX%`; a one-digit CPU value padded with U+2007 keeps the width). Width changes by 4 pt only when power crosses 10 W (the decimal point is narrower than a digit) |
+
+Observation (not a bug): on the first show of a new window, `CGWindowList` reports it at the creation
+position for about 85 ms before the move, but sampled pixels there do not change, so there is no
+visible flash.
+
+### Known issues (found in V0, fix planned on a separate `fix/…` branch)
+
+- **F1 (low):** after `window.destroy()` in `popover.rs` (`destroy_if_hidden`, memory saver), the old
+  NSWindow stays registered in the WindowServer (still listed by `CGWindowList`, off screen), so one
+  NSWindow is kept per memory-saver cycle. Main footprint was 27 MB with the kept window plus the new
+  one (`IOAccelerator` 4 MB). Memory saver is off by default.
+- **F2 (cosmetic):** on the first render of the settings view in WKWebView, the two cards that hold a
+  radio `fieldset` (`SettingRadioGroup`: "Thanh menu", "Giao diện") get about 22–26 px of extra space
+  at the bottom (popover 566 px instead of 522 px). Any re-layout, such as toggling a switch, removes
+  it. Not reproduced in the Chromium mock.
+
 ### Not verified in D2 (chưa kiểm chứng)
 
-- On-screen behaviour of the real popover: placement under the tray icon (also on a second display
-  with a different scale), left-click toggle and 200 ms debounce, Esc closing and returning focus to
-  the previous app, popover top edge staying put while it resizes, 12 px corners with and without
-  "Giảm hiệu ứng", theme switching on the native material, right-click menu items.
-- Disk card update in the real WKWebView within 2 s of mounting a volume (the data path is verified).
-- CSP inside WKWebView (verified in Chromium with the same header).
-- Memory saver releasing and recreating the window after 5 minutes hidden.
+- Popover placement on a second display with a different scale factor (only one display available).
 - Liquid Glass material (macOS 26+), all Apple Silicon behaviour and budgets.
+
+## D4 — CPU temperature and menu bar metrics (`feat/cpu-temperature`)
+
+Date: 2026-10-15. Release x86_64 bundle built from the D4 working tree
+(`pnpm tauri build --target x86_64-apple-darwin --bundles app`), started with `RUST_LOG=pulsebar=debug`,
+plus the browser mock (`pnpm dev:mock`) driven by Playwright (Chromium). On-screen checks used the same
+CGEvent / `CGWindowList` / `screencapture` helpers as V0 (permissions only read). The owner's
+`settings.json` was backed up before the run and restored afterwards (`cmp` identical).
+
+### Automated checks
+
+| AC    | Check                                                                                                                                                                                                                                                                    | Result                                                                                                                                         |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| AC12  | `Snapshot.temperature` and `temperatureUnavailable` serialize to the contract fixture; TS fixture `satisfies` the types; both mock snapshots `satisfies JsonShape<Snapshot>`; settings payload fixture includes `titleMetrics`                                           | Pass (`model.rs`, `settings.rs`, `contract.test.ts`, `contract-settings.test.ts`, `fixtures.test.ts`)                                          |
+| AC13  | Intel key probe: `TCXC` preferred, −44 / −127 / 0 / 116 / NaN rejected, fallback order `TCXC → TCXc → TC0D → TC0E → TC0F → TC0P`, no key → missing sensor, 3 bad reads → re-probe, after a failure re-probe only after 60 s; Rosetta and VMs never open the SMC          | Pass (`intel_temp.rs` 14 tests, `power/mod.rs` slot tests)                                                                                     |
+| AC14  | Apple Silicon resolver: every row of the decision table (`TCMb` → `TCMz` → `macmon`, firmware key used while the macmon session fails, skipped → keep value, 3 invalid fresh samples → error), 15–130 °C bounds; VM never builds macmon                                  | Pass on x86_64 (14 tests); `cargo clippy` and `cargo test --no-run` for `aarch64-apple-darwin` clean. Runtime on M-series: **chưa kiểm chứng** |
+| AC15  | macmon session keeps the sampler for 2 consecutive failures, drops it on the 3rd, resets the counter on success / drop / reopen                                                                                                                                          | Pass (3 new tests, 2 D1 tests updated to 3 failures)                                                                                           |
+| AC15b | On a sleep-gap tick the temperature source is read before `reset_sources`                                                                                                                                                                                                | Pass (`temperature_is_read_before_sources_reset_on_a_gap_tick`: `read:3` then `reset`)                                                         |
+| AC16  | Default metrics keep the D1 title byte for byte; temperature appended last (`· 55°C` / ` 55°`), unavailable → `–°C` / `–°`, temperature only, empty metrics → `""`; `normalized()` forces the icon; a settings file without `titleMetrics` loads defaults without repair | Pass (6 D1 tray tests and 5 loop tests keep their strings; new tray, loop and settings tests)                                                  |
+| AC17  | Vitest: `formatCelsius`, temperature thresholds (80 / 95 °C), temperature history, switch lock rules (all 32 combinations), mock scenarios                                                                                                                               | Pass (Vitest 100 tests)                                                                                                                        |
+
+Gates: `cargo fmt --check`; `cargo clippy --all-targets -- -D warnings` for both targets; `cargo test`
+on x86_64 (253 tests); `cargo test --no-run` on aarch64; `pnpm format:check`, `lint`, `check`, `test`,
+`build`; no comments in changed files; AC8 greps clean.
+
+### Frontend (mock, Chromium)
+
+| Check                | Method                                                                                                                                                         | Result                                                                                                                                                                                     |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Views render         | Apple Silicon / Intel × light / dark × overview / settings, plus `?temperature=unavailable` and `?rosetta=on` (12 screenshots)                                 | Pass: temperature card right after power (`SMC · TCMb` / `SMC · TCXC`, status label, sparkline); unavailable shows the Rust reason + "Không khả dụng"; Rosetta shows the Rosetta reason    |
+| Switch locks         | clicks in the settings view, light and dark                                                                                                                    | Pass: icon off + one metric left → that switch disabled with the hint "Thanh menu cần ít nhất một chỉ số hoặc biểu tượng" (`aria-describedby`); no metric + icon on → icon switch disabled |
+| Contrast             | every visible text node of the temperature and "Thanh menu" cards, min over the nominal and worst material backgrounds, × theme × `prefers-contrast` × effects | Pass: text ≥ 5.20:1; temperature chart stroke ≥ 4.78:1                                                                                                                                     |
+| Settings card height | section heights in the mock                                                                                                                                    | "Thanh menu" 243 px with the 4 new switches (Giao diện 112 px)                                                                                                                             |
+
+### Real app (release x86_64)
+
+| Check                                  | Method                                                                                    | Result                                                                                                                                                                                                                                                                                              |
+| -------------------------------------- | ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Key selection                          | start-up log; `cargo run --example probe_intel` (direct SMC reads)                        | Pass: `SMC temperature key TC0D selected`; probe: `TCXC`/`TCXc` absent, `TC0D`/`TC0E`/`TC0F`/`TC0P`/`TC0H` equal (VirtualSMC)                                                                                                                                                                       |
+| Temperature card                       | screenshot of the popover window                                                          | Pass: "Nhiệt độ CPU 91 °C · Cao · SMC · TC0D" under background load                                                                                                                                                                                                                                 |
+| Default title unchanged                | AX title of the status item with the owner's compact settings                             | Pass: `34%  28W 66%` (D1 format, temperature off)                                                                                                                                                                                                                                                   |
+| Temperature on the title               | toggle the switch in the popover; AX title and status item width                          | Compact `24%  24W 67% 81°` (width 139 → 165 pt); default `CPU 20% ·  23W · RAM 68% · 82°C` (216 → 259 pt); switching it off returns the D1 string `CPU 27% ·  25W · RAM 68%`                                                                                                                        |
+| Title update latency                   | 11 toggles; click time vs `settings.json` rename vs AX title change (50 ms polling)       | Settings saved 0.26–0.37 s after the click; title changed 0.49–2.25 s after the click (2 of 11 above 2 s). The title is rebuilt on the next sampler tick, so the bound is one 2 s tick plus the settings save; accepted by the owner (same behaviour as the D2 title format switch)                 |
+| Temperature rises under load (AC13b)   | `yes > /dev/null` × 8 for 60 s, title every 0.5 s                                         | Pass: 16 samples before the load average 73.8 °C (62–90, background activity); last 44 s of the load average 96.3 °C (peak 100 °C = Tjmax of the i7-7700HQ); rise ≈ 22 °C                                                                                                                           |
+| Independent cross-check (AC13b)        | owner ran `sudo powermetrics --samplers smc -i 2000 -n 15` while the app title was logged | Pass on the window mean (criterion accepted by the owner): powermetrics "CPU die temperature" 83.1 °C (74–95) vs app 84.1 °C (76–93), Δ 1.0 °C. Single samples differ by a median of 4 °C because the sensor swings up to ±10 °C between 2 s samples and the two tools sample at different instants |
+| "Thanh menu" card height (F2 re-check) | screenshot of the settings view right after opening it                                    | Card ≈ 239 px vs 243 px in Chromium; the 22–26 px extra bottom space of F2 was not seen in this run (F2 stays open until its own fix branch)                                                                                                                                                        |
+| Log noise                              | debug log of the whole session                                                            | Pass: no WARN / ERROR                                                                                                                                                                                                                                                                               |
+
+### Performance with the temperature on the title (AC9 / AC18)
+
+Measured with `top -l N -s 10 -pid … -stats pid,command,cpu,mem` (MEM = physical footprint), `footprint`
+and `ps -o rss=`, main process plus the app's three WebKit processes. The host was busy (Chrome and
+other work running; CPU 20–60 % at "idle").
+
+| Budget                                     | Measured                                                                                                              | Status |
+| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------- | ------ |
+| CPU (main process), popover closed ≤ 0.8 % | 0.13 % (first 5 min); 0.16 % over the hour (excluding the 10 min of AX title polling for the powermetrics comparison) | Pass   |
+| CPU (main process), popover open ≤ 3 %     | 0.74 % (5 min, visible the whole time); main + WebKit 2.00 %                                                          | Pass   |
+| Main footprint ≤ 35 MB                     | 27 MB closed and open (RSS 33–35 MB)                                                                                  | Pass   |
+| Total footprint ≤ 120 MB                   | 68–76 MB closed; 91–109 MB open                                                                                       | Pass   |
+| Main growth < 5 MB after 1 h (closed)      | footprint 27 → 27 MB (+0 MB); RSS 34.8 → 33.3 MB                                                                      | Pass   |
+
+### Not verified in D4 (chưa kiểm chứng)
+
+- Apple Silicon runtime: `TCMb` / `TCMz` firmware keys, the macmon `cpu_temp_avg` fallback, the 3-failure
+  session tolerance on real counters, budgets.
+- A real Intel Mac (`TCXC` on genuine hardware); this host's values come from VirtualSMC.
+- Rosetta and virtual machines at runtime (covered by unit tests and the mock only).
+- VoiceOver reading of the new card and switches (semantics checked in code and the accessibility tree).

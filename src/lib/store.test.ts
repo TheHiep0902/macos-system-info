@@ -281,6 +281,41 @@ describe('PopoverStore history', () => {
     expect(store.history.cpu.at(-1)).toBe(HISTORY_CAPACITY + 5);
   });
 
+  it('appends the temperature while it is ok and clears it while it is not', async () => {
+    const transport = createTransport();
+    const store = new PopoverStore(transport);
+    await store.init();
+    expect(store.history.temperature).toEqual([54.5]);
+    transport.emit(EVENTS.snapshot, {
+      ...snapshotAt(11, 1_002_000),
+      temperature: { state: 'ok', celsius: 61.25, source: 'smc:TCMb' },
+    });
+    expect(store.history.temperature).toEqual([54.5, 61.25]);
+    transport.emit(EVENTS.snapshot, {
+      ...snapshotAt(12, 1_004_000),
+      temperature: { state: 'unavailable', reason: 'x' },
+    });
+    expect(store.history.temperature).toEqual([]);
+    expect(store.history.cpu).toHaveLength(3);
+    transport.emit(EVENTS.snapshot, {
+      ...snapshotAt(13, 1_006_000),
+      temperature: { state: 'loading' },
+    });
+    expect(store.history.temperature).toEqual([]);
+    transport.emit(EVENTS.snapshot, snapshotAt(14, 1_008_000));
+    expect(store.history.temperature).toEqual([54.5]);
+  });
+
+  it('restarts the temperature history after a gap like the other series', async () => {
+    const transport = createTransport();
+    const store = new PopoverStore(transport);
+    await store.init();
+    transport.emit(EVENTS.snapshot, snapshotAt(11, 1_002_000));
+    expect(store.history.temperature).toEqual([54.5, 54.5]);
+    transport.emit(EVENTS.snapshot, snapshotAt(13, 1_004_000));
+    expect(store.history.temperature).toEqual([54.5]);
+  });
+
   it('clears the power history while power is unavailable', async () => {
     const transport = createTransport();
     const store = new PopoverStore(transport);

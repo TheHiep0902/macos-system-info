@@ -45,6 +45,7 @@
   --radio-dot-size: 6px;
   --core-cell-min-width: 84px;
   --skeleton-line-height: 10px;
+  --opacity-disabled: 0.4;
 
   --duration-fast: 120ms;
   --duration-base: 200ms;
@@ -55,5 +56,11 @@
   :root {
     --duration-fast: 0ms;
     --duration-base: 0ms;
+  }
+}
+
+@media (prefers-contrast: more) {
+  :root {
+    --opacity-disabled: 0.6;
   }
 }

@@ -5,7 +5,7 @@
   interface Props {
     title: string;
     icon: LucideIcon;
-    tone: 'cpu' | 'power' | 'memory' | 'disk' | 'network' | 'uptime';
+    tone: 'cpu' | 'power' | 'temperature' | 'memory' | 'disk' | 'network' | 'uptime';
     busy?: boolean;
     aside?: Snippet;
     children: Snippet;
@@ -55,6 +55,10 @@
 
   .card[data-tone='power'] :global(.card-icon) {
     color: var(--color-chart-power);
+  }
+
+  .card[data-tone='temperature'] :global(.card-icon) {
+    color: var(--color-chart-temperature);
   }
 
   .card[data-tone='memory'] :global(.card-icon) {

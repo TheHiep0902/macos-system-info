@@ -24,11 +24,16 @@ mod intel {
         IntelIoReport, IoReportFreq, IoReportPower,
     };
     use pulsebar_lib::sampler::power::intel_smc::{KEY_CANDIDATES, SmcPower};
-    use pulsebar_lib::sampler::power::{FreqSource, PowerSource, SAMPLE_INTERVAL, Tick};
+    use pulsebar_lib::sampler::power::intel_temp::{SmcTemp, TEMP_KEYS};
+    use pulsebar_lib::sampler::power::{
+        FreqSource, PowerSource, SAMPLE_INTERVAL, TempSource, Tick,
+    };
     use pulsebar_lib::smc::SmcConnection;
     use pulsebar_lib::sys::{sysctl_u32, sysctl_u64};
 
     const SAMPLES: u64 = 5;
+
+    const EXTRA_TEMP_KEYS: [&str; 1] = ["TC0H"];
 
     fn thread_cpu_time() -> Result<Duration, Box<dyn Error>> {
         let mut now = libc::timespec {
@@ -51,6 +56,32 @@ mod intel {
 
     fn mhz(value: Option<u32>) -> String {
         value.map_or_else(|| "n/a".to_string(), |v| v.to_string())
+    }
+
+    fn print_temperatures(smc: &mut SmcConnection) {
+        for key in TEMP_KEYS.iter().chain(&EXTRA_TEMP_KEYS) {
+            match smc.read_f32(key) {
+                Ok(value) => println!("smc temp {key} = {value:.2} °C"),
+                Err(err) => println!("smc temp {key} = n/a ({err})"),
+            }
+        }
+        match SmcTemp::probe() {
+            Ok(mut temp) => {
+                let tick = Tick {
+                    seq: 0,
+                    now: Instant::now(),
+                };
+                match temp.read(&tick) {
+                    Ok(Some(reading)) => println!(
+                        "SmcTemp::probe selected {} ({:.1} °C)",
+                        reading.source, reading.celsius
+                    ),
+                    Ok(None) => println!("SmcTemp::probe selected a key, first read rejected"),
+                    Err(err) => println!("SmcTemp::probe selected a key, first read failed: {err}"),
+                }
+            }
+            Err(err) => println!("SmcTemp::probe failed: {err}"),
+        }
     }
 
     pub fn run() -> Result<(), Box<dyn Error>> {
@@ -78,6 +109,7 @@ mod intel {
             Err(err) => println!("SmcPower::probe failed: {err}"),
         }
         let mut smc = SmcConnection::open()?;
+        print_temperatures(&mut smc);
 
         let start = Instant::now();
         for seq in 0..=SAMPLES {

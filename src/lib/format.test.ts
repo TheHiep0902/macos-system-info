@@ -3,6 +3,7 @@ import {
   PLACEHOLDER,
   clusterName,
   formatBytes,
+  formatCelsius,
   formatDateTime,
   formatInteger,
   formatMhz,
@@ -78,6 +79,22 @@ describe('formatWatts', () => {
   });
 });
 
+describe('formatCelsius', () => {
+  it('rounds to whole degrees with a no-break space before °C', () => {
+    expect(formatCelsius(54.4)).toBe(`54${NBSP}°C`);
+    expect(formatCelsius(54.5)).toBe(`55${NBSP}°C`);
+    expect(formatCelsius(71)).toBe(`71${NBSP}°C`);
+    expect(formatCelsius(99.6)).toBe(`100${NBSP}°C`);
+  });
+
+  it('shows the placeholder for missing or non-finite values', () => {
+    expect(formatCelsius(null)).toBe(PLACEHOLDER);
+    expect(formatCelsius(undefined)).toBe(PLACEHOLDER);
+    expect(formatCelsius(Number.NaN)).toBe(PLACEHOLDER);
+    expect(formatCelsius(Number.POSITIVE_INFINITY)).toBe(PLACEHOLDER);
+  });
+});
+
 describe('formatUptime', () => {
   it('writes days, hours and minutes in Vietnamese', () => {
     expect(formatUptime(3 * 86400 + 4 * 3600 + 12 * 60 + 59)).toBe('3 ngày 4 giờ 12 phút');
@@ -108,6 +125,10 @@ describe('other formatters', () => {
     expect(sourceLabel('smc:PCPT')).toBe('SMC · PCPT');
     expect(sourceLabel('smc:PC0C')).toBe('SMC · PC0C');
     expect(sourceLabel('nominal')).toBe('Danh định');
+    expect(sourceLabel('smc:TC0D')).toBe('SMC · TC0D');
+    expect(sourceLabel('smc:TCMb')).toBe('SMC · TCMb');
+    expect(sourceLabel('smc:TCXc')).toBe('SMC · TCXc');
+    expect(sourceLabel('macmon')).toBe('macmon');
     expect(sourceLabel('custom')).toBe('custom');
   });
 

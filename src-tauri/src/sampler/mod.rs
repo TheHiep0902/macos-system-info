@@ -14,12 +14,12 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::model::{
     ClusterInfo, ClusterSample, CoreSample, CpuSample, DiskSample, FrequencySample, MemorySample,
-    MetricState, NetworkSample, PowerSample, Snapshot, StaticInfo,
+    MetricState, NetworkSample, PowerSample, Snapshot, StaticInfo, TemperatureSample,
 };
 use crate::platform::{self, HostFacts};
 use crate::sys::SysError;
 use crate::topology::{self, Topology};
-use crate::tray::{self, TitleFormat};
+use crate::tray::{self, TitleFormat, TitleMetrics, TitleValues};
 
 use self::clock::Clock;
 use self::cpu::{CpuLoad, CpuLoadReader};
@@ -27,7 +27,7 @@ use self::disks::{DiskScan, DiskScanOptions, DiskScanner};
 use self::network::NetworkReader;
 use self::power::{
     Arch, FreqReading, FreqSlot, HostEnv, PowerBackend, PowerSlot, REASON_STALE_COUNTER,
-    SAMPLE_INTERVAL, Selected, SourceError, Tick,
+    SAMPLE_INTERVAL, Selected, SourceError, TempReading, TempSlot, Tick,
 };
 
 pub const GAP_THRESHOLD: Duration = Duration::from_secs(3);
@@ -48,6 +48,7 @@ pub struct SharedState {
     pub include_network_disks: AtomicBool,
     pub compact_title: AtomicBool,
     pub shutdown: AtomicBool,
+    title_metrics: Mutex<TitleMetrics>,
     snapshot: Mutex<Option<Snapshot>>,
     static_info: Mutex<Option<StaticInfo>>,
 }
@@ -63,6 +64,14 @@ impl SharedState {
 
     pub fn static_info(&self) -> Option<StaticInfo> {
         lock(&self.static_info).clone()
+    }
+
+    pub fn title_metrics(&self) -> TitleMetrics {
+        *lock(&self.title_metrics)
+    }
+
+    pub fn set_title_metrics(&self, metrics: TitleMetrics) {
+        *lock(&self.title_metrics) = metrics;
     }
 
     pub fn shutdown_requested(&self) -> bool {
@@ -113,6 +122,7 @@ pub trait SystemReaders {
 pub struct Backend {
     pub power: PowerSlot,
     pub freq: FreqSlot,
+    pub temp: TempSlot,
     pub readers: Box<dyn SystemReaders>,
     pub topology: Topology,
     pub static_info: StaticInfo,
@@ -214,6 +224,7 @@ impl BackendFactory for HostBackendFactory {
         Backend {
             power: backend.power,
             freq: backend.freq,
+            temp: backend.temp,
             readers: Box::new(HostReaders::new(facts.total_memory_bytes)),
             topology,
             static_info,
@@ -394,6 +405,52 @@ impl FreqTracker {
     }
 }
 
+#[derive(Debug)]
+pub struct TempTracker {
+    state: MetricState<TemperatureSample>,
+}
+
+impl Default for TempTracker {
+    fn default() -> Self {
+        TempTracker {
+            state: MetricState::Loading,
+        }
+    }
+}
+
+impl TempTracker {
+    pub fn state(&self) -> &MetricState<TemperatureSample> {
+        &self.state
+    }
+
+    pub fn set_unavailable(&mut self, reason: &str) {
+        self.state = MetricState::Unavailable {
+            reason: reason.to_owned(),
+        };
+    }
+
+    pub fn update(&mut self, input: Result<Option<TempReading>, SourceError>) {
+        match input {
+            Ok(None) => {}
+            Ok(Some(reading)) => {
+                self.state = MetricState::Ok(TemperatureSample {
+                    celsius: reading.celsius,
+                    source: reading.source.to_owned(),
+                });
+            }
+            Err(err) => {
+                let unchanged = matches!(
+                    &self.state,
+                    MetricState::Unavailable { reason } if *reason == err.reason
+                );
+                if !unchanged {
+                    self.set_unavailable(&err.reason);
+                }
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Backoff {
     next: Duration,
@@ -556,11 +613,21 @@ fn read_freq(slot: &mut FreqSlot, tick: &Tick) -> Option<Result<Option<FreqReadi
     }
 }
 
+fn read_temp(slot: &mut TempSlot, tick: &Tick) -> Option<Result<Option<TempReading>, SourceError>> {
+    match slot {
+        Selected::Ready(source) => Some(source.read(tick)),
+        Selected::Unavailable(_) => None,
+    }
+}
+
 fn reset_sources(backend: &mut Backend) {
     if let Selected::Ready(source) = &mut backend.power {
         source.reset();
     }
     if let Selected::Ready(source) = &mut backend.freq {
+        source.reset();
+    }
+    if let Selected::Ready(source) = &mut backend.temp {
         source.reset();
     }
     backend.readers.reset_cpu();
@@ -570,7 +637,7 @@ fn paces(backend: &Backend) -> bool {
     backend.power.ready().is_some_and(|source| source.paces())
 }
 
-fn state_label(state: &MetricState<PowerSample>) -> Option<&str> {
+fn state_label<T>(state: &MetricState<T>) -> Option<&str> {
     match state {
         MetricState::Unavailable { reason } => Some(reason),
         _ => None,
@@ -581,6 +648,7 @@ struct LoopState {
     seq: u64,
     power: PowerFilter,
     frequency: FreqTracker,
+    temperature: TempTracker,
     last_cpu: Option<CpuLoad>,
     last_memory: Option<MemorySample>,
     disks: Vec<DiskSample>,
@@ -606,6 +674,7 @@ pub fn run_loop<C: Clock, S: Sink>(
         seq: 0,
         power: PowerFilter::default(),
         frequency: FreqTracker::default(),
+        temperature: TempTracker::default(),
         last_cpu: None,
         last_memory: None,
         disks: Vec::new(),
@@ -620,6 +689,9 @@ pub fn run_loop<C: Clock, S: Sink>(
     if let Selected::Unavailable(reason) = &backend.freq {
         state.frequency.set_unavailable(reason);
     }
+    if let Selected::Unavailable(reason) = &backend.temp {
+        state.temperature.set_unavailable(reason);
+    }
     shared.publish_static_info(backend.static_info.clone());
 
     let start = clock.now_instant();
@@ -631,6 +703,9 @@ pub fn run_loop<C: Clock, S: Sink>(
         }
         if let (Some(Err(err)), Some(_)) = (read_freq(&mut backend.freq, &prime), freq_kind) {
             state.frequency.set_unavailable(&err.reason);
+        }
+        if let Some(Err(err)) = read_temp(&mut backend.temp, &prime) {
+            state.temperature.set_unavailable(&err.reason);
         }
         state.previous_sample = Some(SampleTime {
             wall: clock.now_wall(),
@@ -644,6 +719,7 @@ pub fn run_loop<C: Clock, S: Sink>(
         .all(|cluster| cluster.max_mhz.is_none());
     let mut deadline = start + interval;
     let mut logged_power: Option<String> = state_label(state.power.state()).map(str::to_owned);
+    let mut logged_temp: Option<String> = state_label(state.temperature.state()).map(str::to_owned);
 
     while !shared.shutdown_requested() {
         let paced = paces(&backend);
@@ -663,6 +739,7 @@ pub fn run_loop<C: Clock, S: Sink>(
         };
         let power_input = read_power(&mut backend.power, &tick);
         let freq_input = read_freq(&mut backend.freq, &tick);
+        let temp_input = read_temp(&mut backend.temp, &tick);
         let wall = clock.now_wall();
         let sample_time = SampleTime {
             wall,
@@ -688,6 +765,9 @@ pub fn run_loop<C: Clock, S: Sink>(
             if let (Some(input), Some(kind)) = (freq_input, freq_kind) {
                 state.frequency.update(input, kind);
             }
+            if let Some(input) = temp_input {
+                state.temperature.update(input);
+            }
         }
         if needs_cluster_max
             && matches!(state.power.state(), MetricState::Ok(_))
@@ -706,6 +786,14 @@ pub fn run_loop<C: Clock, S: Sink>(
                 None => log::info!("power metric available"),
             }
             logged_power = current_power;
+        }
+        let current_temp = state_label(state.temperature.state()).map(str::to_owned);
+        if current_temp != logged_temp {
+            match &current_temp {
+                Some(reason) => log::warn!("temperature metric unavailable: {reason}"),
+                None => log::info!("temperature metric available"),
+            }
+            logged_temp = current_temp;
         }
 
         if let Some(memory) = backend.readers.memory() {
@@ -728,12 +816,13 @@ pub fn run_loop<C: Clock, S: Sink>(
             state.network = backend.readers.network();
         }
 
-        let title = tray::format_title(
+        let values = TitleValues {
             cpu_pct,
-            state.power.state(),
-            state.last_memory.as_ref().map(|memory| memory.used_pct),
-            shared.title_format(),
-        );
+            power: state.power.state(),
+            ram_pct: state.last_memory.as_ref().map(|memory| memory.used_pct),
+            temperature: state.temperature.state(),
+        };
+        let title = tray::format_title(&values, shared.title_format(), shared.title_metrics());
         if title != state.title {
             log::trace!("title {title}");
             sink.set_title(&title);
@@ -747,6 +836,7 @@ pub fn run_loop<C: Clock, S: Sink>(
                 timestamp_ms: unix_millis(wall),
                 cpu: cpu_sample(load, &backend.topology, &state.frequency, include_cores),
                 power: state.power.state().clone(),
+                temperature: state.temperature.state().clone(),
                 memory: state.last_memory.clone().unwrap_or_default(),
                 disks: state.disks.clone(),
                 network: state.network.clone(),
@@ -814,7 +904,7 @@ mod tests {
     use super::*;
     use crate::model::{FreqSource as FreqKind, Platform};
     use crate::sampler::power::REASON_READ_FAILED;
-    use crate::sampler::power::{FreqSource, PowerScope, PowerSource};
+    use crate::sampler::power::{FreqSource, PowerScope, PowerSource, TempSource};
     use std::cell::{Cell, RefCell};
     use std::collections::VecDeque;
     use std::rc::Rc;
@@ -921,6 +1011,28 @@ mod tests {
         cpu_resets: Cell<u32>,
         disk_scans: Cell<u32>,
         builds: Cell<u32>,
+        temp_events: RefCell<Vec<String>>,
+    }
+
+    struct FakeTemp {
+        counters: Rc<Counters>,
+    }
+
+    impl TempSource for FakeTemp {
+        fn read(&mut self, tick: &Tick) -> Result<Option<TempReading>, SourceError> {
+            self.counters
+                .temp_events
+                .borrow_mut()
+                .push(format!("read:{}", tick.seq));
+            Ok(Some(TempReading {
+                celsius: 50.4,
+                source: "smc:TC0D",
+            }))
+        }
+
+        fn reset(&mut self) {
+            self.counters.temp_events.borrow_mut().push("reset".into());
+        }
     }
 
     struct ScriptedPower {
@@ -1073,6 +1185,9 @@ mod tests {
             Backend {
                 power: Selected::Ready(Box::new(power)),
                 freq: Selected::Ready(Box::new(NominalFake)),
+                temp: Selected::Ready(Box::new(FakeTemp {
+                    counters: Rc::clone(&self.counters),
+                })),
                 readers: Box::new(FakeReaders {
                     counters: Rc::clone(&self.counters),
                     primed: false,
@@ -1296,6 +1411,100 @@ mod tests {
     }
 
     #[test]
+    fn temperature_is_read_before_sources_reset_on_a_gap_tick() {
+        let factory = ScriptedFactory::new(Vec::new());
+        let shared = SharedState::default();
+        let mut clock = FakeClock::new(&shared, 5);
+        clock.wall_jump = Some((3, Duration::from_secs(3_600)));
+        let sink = RecordingSink::default();
+        run_loop(&shared, &sink, &clock, factory.build());
+        let events = factory.counters.temp_events.borrow().clone();
+        assert_eq!(
+            events,
+            ["read:0", "read:1", "read:2", "read:3", "reset", "read:4"]
+        );
+        assert_eq!(factory.counters.power_resets.get(), 1);
+    }
+
+    #[test]
+    fn temperature_reaches_snapshot_and_title_when_enabled() {
+        let factory = ScriptedFactory::new(Vec::new());
+        let shared = SharedState::default();
+        shared.set_title_metrics(TitleMetrics {
+            temperature: true,
+            ..TitleMetrics::default()
+        });
+        let clock = FakeClock::new(&shared, 3);
+        let sink = RecordingSink::default();
+        run_loop(&shared, &sink, &clock, factory.build());
+        assert_eq!(
+            *sink.titles.borrow(),
+            vec![format!("{} · 50°C", title("5.0"))]
+        );
+        let snapshot = shared.snapshot().expect("snapshot published");
+        assert_eq!(
+            snapshot.temperature,
+            MetricState::Ok(TemperatureSample {
+                celsius: 50.4,
+                source: "smc:TC0D".into()
+            })
+        );
+    }
+
+    #[test]
+    fn unavailable_temperature_slot_is_reported_in_the_snapshot() {
+        let shared = Arc::new(SharedState::default());
+        let clock = FakeClock::new(&shared, 100);
+        let power = PacedPower {
+            clock: clock.handle(),
+            shared: Arc::clone(&shared),
+            reads: 0,
+            stop_after: 2,
+            fail_at: None,
+            alive: true,
+            resets: Rc::new(Cell::new(0)),
+        };
+        let sink = RecordingSink::default();
+        run_loop(&shared, &sink, &clock, paced_backend(power));
+        let snapshot = shared.snapshot().expect("snapshot published");
+        assert_eq!(
+            snapshot.temperature,
+            MetricState::Unavailable {
+                reason: REASON_READ_FAILED.into()
+            }
+        );
+    }
+
+    #[test]
+    fn temp_tracker_keeps_value_on_pending_and_reports_errors() {
+        let mut tracker = TempTracker::default();
+        assert_eq!(tracker.state(), &MetricState::Loading);
+        tracker.update(Ok(None));
+        assert_eq!(tracker.state(), &MetricState::Loading);
+        let reading = TempReading {
+            celsius: 61.0,
+            source: "smc:TCMb",
+        };
+        tracker.update(Ok(Some(reading)));
+        let ok = MetricState::Ok(TemperatureSample {
+            celsius: 61.0,
+            source: "smc:TCMb".into(),
+        });
+        assert_eq!(tracker.state(), &ok);
+        tracker.update(Ok(None));
+        assert_eq!(tracker.state(), &ok);
+        tracker.update(Err(SourceError::new("lý do", "detail")));
+        assert_eq!(
+            tracker.state(),
+            &MetricState::Unavailable {
+                reason: "lý do".into()
+            }
+        );
+        tracker.update(Ok(Some(reading)));
+        assert_eq!(tracker.state(), &ok);
+    }
+
+    #[test]
     fn closed_popover_refreshes_disks_every_five_ticks_without_emitting() {
         let factory = ScriptedFactory::new(Vec::new());
         let shared = SharedState::default();
@@ -1345,6 +1554,7 @@ mod tests {
         let backend = PowerBackend {
             power: Selected::Unavailable("x".into()),
             freq: Selected::Ready(Box::new(NominalFake)),
+            temp: Selected::Unavailable("y".into()),
             cluster_max_mhz: vec![Some(2064), Some(3204)],
         };
         let info = build_static_info(&facts, &topology, &backend);
@@ -1459,6 +1669,7 @@ mod tests {
         Backend {
             power: Selected::Ready(Box::new(power)),
             freq: Selected::Ready(Box::new(NominalFake)),
+            temp: Selected::Unavailable(REASON_READ_FAILED.into()),
             readers: Box::new(FakeReaders {
                 counters: Rc::new(Counters::default()),
                 primed: false,

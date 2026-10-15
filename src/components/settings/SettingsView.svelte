@@ -2,6 +2,7 @@
   import Power from '@lucide/svelte/icons/power';
   import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
   import { t } from '../../lib/i18n';
+  import { menuBarLocks, type TitleMetricKey } from '../../lib/title-metrics';
   import type { Settings, ThemePreference, TitleFormat } from '../../lib/types';
   import PopoverShell from '../layout/PopoverShell.svelte';
   import ViewHeader from '../layout/ViewHeader.svelte';
@@ -46,6 +47,20 @@
     { value: 'light', label: t('settings.theme.light') },
     { value: 'dark', label: t('settings.theme.dark') },
   ];
+
+  const titleMetrics: readonly { key: TitleMetricKey; label: string }[] = [
+    { key: 'cpu', label: t('settings.titleMetrics.cpu') },
+    { key: 'power', label: t('settings.titleMetrics.power') },
+    { key: 'memory', label: t('settings.titleMetrics.memory') },
+    { key: 'temperature', label: t('settings.titleMetrics.temperature') },
+  ];
+
+  function setTitleMetric(key: TitleMetricKey, shown: boolean): void {
+    if (settings === null) {
+      return;
+    }
+    onchange({ titleMetrics: { ...settings.titleMetrics, [key]: shown } });
+  }
 </script>
 
 <PopoverShell {notice} {onheightchange} header={viewHeader} busy={settings === null}>
@@ -56,6 +71,7 @@
       <Skeleton lines={5} />
     {/if}
   {:else}
+    {@const locks = menuBarLocks(settings)}
     <section class="section" aria-labelledby={`${uid}-menu-bar`}>
       <h2 class="section-title" id={`${uid}-menu-bar`}>{t('settings.menuBar')}</h2>
       <SettingRadioGroup
@@ -65,9 +81,25 @@
         options={titleFormats}
         onchange={(titleFormat) => onchange({ titleFormat })}
       />
+      <div class="metrics" role="group" aria-labelledby={`${uid}-title-metrics`}>
+        <span id={`${uid}-title-metrics`}>{t('settings.titleMetrics')}</span>
+        <div class="metric-switches">
+          {#each titleMetrics as metric (metric.key)}
+            <SettingSwitch
+              label={metric.label}
+              hint={locks.metrics[metric.key] ? t('settings.titleMetrics.hint') : undefined}
+              checked={settings.titleMetrics[metric.key]}
+              disabled={locks.metrics[metric.key]}
+              onchange={(shown) => setTitleMetric(metric.key, shown)}
+            />
+          {/each}
+        </div>
+      </div>
       <SettingSwitch
         label={t('settings.showTrayIcon')}
+        hint={locks.icon ? t('settings.titleMetrics.hint') : undefined}
         checked={settings.showTrayIcon}
+        disabled={locks.icon}
         onchange={(showTrayIcon) => onchange({ showTrayIcon })}
       />
     </section>
@@ -143,6 +175,17 @@
     color: var(--color-text-secondary);
     font-size: var(--font-size-sm);
     font-weight: var(--font-weight-semibold);
+  }
+
+  .metrics,
+  .metric-switches {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+  }
+
+  .metric-switches {
+    padding-inline-start: var(--space-6);
   }
 
   .error {

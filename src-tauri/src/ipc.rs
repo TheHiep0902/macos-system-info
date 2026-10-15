@@ -51,11 +51,12 @@ pub fn set_settings<R: Runtime>(
     settings: SettingsPayload,
 ) -> Result<SettingsPayload, String> {
     let previous = store.get();
-    store.save(settings.settings.clone()).map_err(|err| {
+    let next = settings.settings.normalized();
+    store.save(next.clone()).map_err(|err| {
         log::warn!("could not save settings: {err}");
         SETTINGS_SAVE_FAILED.to_owned()
     })?;
-    settings::apply(&app, &previous, &settings.settings);
+    settings::apply(&app, &previous, &next);
     let launch_at_login = settings::set_launch_at_login(&app, settings.launch_at_login);
     Ok(SettingsPayload {
         settings: store.get(),

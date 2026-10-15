@@ -141,6 +141,11 @@
     "source": "smc:PCPT",
     "scope": "package"
   },
+  "temperature": {
+    "state": "ok",
+    "celsius": 71,
+    "source": "smc:TCXC"
+  },
   "memory": {
     "usedBytes": 27917287424,
     "totalBytes": 34359738368,

@@ -33,6 +33,7 @@
   --color-chart-memory: #7b3fc4;
   --color-chart-disk: #08786f;
   --color-chart-network: #2e7d32;
+  --color-chart-temperature: #c0267a;
 }
 
 :root[data-theme='dark'] {
@@ -68,6 +69,7 @@
   --color-chart-memory: #c09cff;
   --color-chart-disk: #4dd4c6;
   --color-chart-network: #7bd88f;
+  --color-chart-temperature: #ff85c0;
 }
 
 @media (prefers-contrast: more) {
@@ -97,6 +99,7 @@
     --color-chart-memory: #6230a8;
     --color-chart-disk: #06615a;
     --color-chart-network: #236326;
+    --color-chart-temperature: #931656;
   }
 
   :root[data-theme='dark'] {
@@ -124,6 +127,7 @@
     --color-chart-memory: #d2b8ff;
     --color-chart-disk: #7fe3d8;
     --color-chart-network: #9fe6ad;
+    --color-chart-temperature: #ffb0d4;
   }
 }
 
