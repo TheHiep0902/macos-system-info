@@ -130,6 +130,8 @@ export interface TitleMetrics {
   temperature: boolean;
 }
 
+export type LaunchAtLoginStatus = 'enabled' | 'disabled' | 'requiresApproval' | 'blocked';
+
 export interface Settings {
   titleFormat: TitleFormat;
   showTrayIcon: boolean;
@@ -139,6 +141,8 @@ export interface Settings {
   showNetworkDisks: boolean;
   memorySaver: boolean;
   launchAtLogin: boolean;
+  launchAtLoginStatus: LaunchAtLoginStatus;
+  launchAtLoginReason: string | null;
 }
 
 export type PopoverView = 'overview' | 'cpu-detail' | 'settings';

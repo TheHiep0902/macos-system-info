@@ -8,19 +8,20 @@ in each component is the authoritative prop contract; this file explains intent.
 
 Names live in `src/lib/ipc.ts`; payload types in `src/lib/types.ts`.
 
-| Kind    | Name                   | Payload / arguments              | Notes                                                                     |
-| ------- | ---------------------- | -------------------------------- | ------------------------------------------------------------------------- |
-| command | `get_static_info`      | → `StaticInfo \| null`           | `null` until the sampler has started; re-invoked on every popover show    |
-| command | `get_snapshot`         | → `Snapshot \| null`             | latest sample; `null` before the first tick (render skeletons)            |
-| command | `set_detail_enabled`   | `{ enabled: boolean }`           | `true` while the CPU detail view is open, so `cpu.cores[]` is filled      |
-| command | `get_settings`         | → `Settings`                     | `launchAtLogin` comes from the autostart plugin, not the settings file    |
-| command | `set_settings`         | `{ settings: Settings }` → saved | Rust validates, persists atomically and applies; returns the stored value |
-| command | `hide_popover`         | —                                | used for Esc                                                              |
-| command | `resize_popover`       | `{ height: number }`             | logical px; Rust clamps to 200–640                                        |
-| command | `quit_app`             | —                                |                                                                           |
-| event   | `metrics://snapshot`   | `Snapshot`                       | every 2 s, only while the popover is visible                              |
-| event   | `disks://changed`      | `null`                           | a volume was mounted or unmounted                                         |
-| event   | `popover://visibility` | `PopoverVisibility`              | emitted by Rust on show/hide; `view` requests a view on show              |
+| Kind    | Name                        | Payload / arguments              | Notes                                                                                                         |
+| ------- | --------------------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| command | `get_static_info`           | → `StaticInfo \| null`           | `null` until the sampler has started; re-invoked on every popover show                                        |
+| command | `get_snapshot`              | → `Snapshot \| null`             | latest sample; `null` before the first tick (render skeletons)                                                |
+| command | `set_detail_enabled`        | `{ enabled: boolean }`           | `true` while the CPU detail view is open, so `cpu.cores[]` is filled                                          |
+| command | `get_settings`              | → `Settings`                     | the three `launchAtLogin*` fields come from `SMAppService`, not the settings file                             |
+| command | `set_settings`              | `{ settings: Settings }` → saved | Rust validates, persists atomically and applies; returns the stored value and the real launch-at-login status |
+| command | `hide_popover`              | —                                | used for Esc                                                                                                  |
+| command | `resize_popover`            | `{ height: number }`             | logical px; Rust clamps to 200–640                                                                            |
+| command | `quit_app`                  | —                                |                                                                                                               |
+| command | `open_login_items_settings` | —                                | opens System Settings › General › Login Items; returns nothing                                                |
+| event   | `metrics://snapshot`        | `Snapshot`                       | every 2 s, only while the popover is visible                                                                  |
+| event   | `disks://changed`           | `null`                           | a volume was mounted or unmounted                                                                             |
+| event   | `popover://visibility`      | `PopoverVisibility`              | emitted by Rust on show/hide; `view` requests a view on show                                                  |
 
 Payload fields added in D4:
 
@@ -33,26 +34,42 @@ Payload fields added in D4:
   (the D1 title). Rust `normalized()` forces `showTrayIcon = true` when no title metric is on and the
   icon is off; the settings view never sends that state (see `SettingsView` below).
 
+Payload fields added in D5 (launch at login through `SMAppService`):
+
+- `Settings.launchAtLoginStatus: LaunchAtLoginStatus`, one of `enabled`, `disabled`,
+  `requiresApproval` (registered, but the user has not allowed it in System Settings yet) or `blocked`
+  (login is off and Pulsebar runs from a read-only mount such as a DMG, from App Translocation or
+  outside an `.app` bundle, so registering would not survive).
+- `Settings.launchAtLoginReason: string | null`: a Vietnamese reason from Rust, set only when the
+  status is `blocked` (for example "Hãy chép Pulsebar vào thư mục Applications rồi bật lại"). The
+  frontend displays it as-is.
+- `Settings.launchAtLogin: boolean` stays and equals `enabled || requiresApproval`; it is the only
+  launch field the frontend asks Rust to change.
+- Both new fields are output-only. The store still sends the whole `Settings` object to
+  `set_settings`, including whatever status and reason it last received, and Rust ignores them on
+  input; the payload Rust returns replaces them.
+
 ## Source layout
 
-| Path                       | Role                                                                                            |
-| -------------------------- | ----------------------------------------------------------------------------------------------- |
-| `src/main.ts`              | sets the initial `data-theme`, creates the transport and store, mounts `App`, calls `init()`    |
-| `src/App.svelte`           | view switch (`overview` / `cpu-detail` / `settings`), root attributes, Esc, focus restoration   |
-| `src/lib/transport.ts`     | `Transport` interface, the Tauri implementation, mock selection via dynamic import              |
-| `src/lib/store.svelte.ts`  | `PopoverStore`: event-driven state, history buffers, settings saves, command failures           |
-| `src/lib/format.ts`        | vi-VN number, byte, MHz, W, °C, uptime and date formatting; source, scope and cluster labels    |
-| `src/lib/thresholds.ts`    | warn / critical thresholds and their text labels                                                |
-| `src/lib/title-metrics.ts` | `TITLE_METRIC_KEYS` and `menuBarLocks`, the pure lock rule for the menu bar switches            |
-| `src/lib/i18n.ts`          | every Vietnamese string, typed keys and typed `{placeholder}` interpolation                     |
-| `src/lib/theme.ts`         | `resolveTheme`, `resolveEffects` and the media queries they follow                              |
-| `src/lib/sparkline.ts`     | polyline points and min / max for the sparkline text equivalent                                 |
-| `src/lib/motion.ts`        | `fadeToken` transition whose duration is read from `--duration-fast`                            |
-| `src/styles/tokens.css`    | non-colour tokens and the reduced-motion override                                               |
-| `src/styles/themes.css`    | colour tokens per theme, increased-contrast overrides, reduced-effects overrides                |
-| `src/styles/base.css`      | reset, focus ring, `.sr-only`, `.selectable`, shared `.metric-*` classes, motion pausing        |
-| `src/mocks/transport.ts`   | mock backend for `pnpm dev:mock` (reachable only through the dynamic import in `transport.ts`)  |
-| `src/mocks/*.json`         | mock fixtures (Apple Silicon and Intel `StaticInfo` / `Snapshot`) and the IPC contract fixtures |
+| Path                         | Role                                                                                               |
+| ---------------------------- | -------------------------------------------------------------------------------------------------- |
+| `src/main.ts`                | sets the initial `data-theme`, creates the transport and store, mounts `App`, calls `init()`       |
+| `src/App.svelte`             | view switch (`overview` / `cpu-detail` / `settings`), root attributes, Esc, focus restoration      |
+| `src/lib/transport.ts`       | `Transport` interface, the Tauri implementation, mock selection via dynamic import                 |
+| `src/lib/store.svelte.ts`    | `PopoverStore`: event-driven state, history buffers, settings saves, command failures              |
+| `src/lib/format.ts`          | vi-VN number, byte, MHz, W, °C, uptime and date formatting; source, scope and cluster labels       |
+| `src/lib/thresholds.ts`      | warn / critical thresholds and their text labels                                                   |
+| `src/lib/title-metrics.ts`   | `TITLE_METRIC_KEYS` and `menuBarLocks`, the pure lock rule for the menu bar switches               |
+| `src/lib/launch-at-login.ts` | `launchAtLoginUi`, the pure status → switch state, hint and button rule for "Khởi động cùng macOS" |
+| `src/lib/i18n.ts`            | every Vietnamese string, typed keys and typed `{placeholder}` interpolation                        |
+| `src/lib/theme.ts`           | `resolveTheme`, `resolveEffects` and the media queries they follow                                 |
+| `src/lib/sparkline.ts`       | polyline points and min / max for the sparkline text equivalent                                    |
+| `src/lib/motion.ts`          | `fadeToken` transition whose duration is read from `--duration-fast`                               |
+| `src/styles/tokens.css`      | non-colour tokens and the reduced-motion override                                                  |
+| `src/styles/themes.css`      | colour tokens per theme, increased-contrast overrides, reduced-effects overrides                   |
+| `src/styles/base.css`        | reset, focus ring, `.sr-only`, `.selectable`, shared `.metric-*` classes, motion pausing           |
+| `src/mocks/transport.ts`     | mock backend for `pnpm dev:mock` (reachable only through the dynamic import in `transport.ts`)     |
+| `src/mocks/*.json`           | mock fixtures (Apple Silicon and Intel `StaticInfo` / `Snapshot`) and the IPC contract fixtures    |
 
 Colour literals (`#…`, `rgb(…)`, `rgba(…)`, `hsl(…)`) exist only in `tokens.css` and `themes.css`;
 every other colour, spacing, radius, size, font, duration and easing is a `var(--…)`.
@@ -236,11 +253,11 @@ Silicon cells "Lõi {id}".
 
 ### settings
 
-| Component           | Props                                                                                                               | Notes                                                                                                                                                                                                                                                                                                                     |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SettingsView`      | `settings`, `saving`, `saveFailed`, `loadFailed`, `notice`, `onheightchange`, `onchange(patch)`, `onback`, `onquit` | sections Thanh menu / Giao diện / Ổ đĩa / Hệ thống; skeleton while `settings` is null, `EmptyState` if `get_settings` failed; "Đang lưu…" in a `role="status"` line; inline `role="alert"` error after a failed save; quit button                                                                                         |
-| `SettingSwitch`     | `label`, `hint?`, `checked`, `disabled?`, `onchange(checked)`                                                       | native `<input type="checkbox" role="switch" aria-checked>` with a `<label for>`; hint linked by `aria-describedby`; Enter toggles too; `disabled` sets the native attribute (announced as dimmed, skipped by Tab, no handler runs), dims the control with `--opacity-disabled` and the label to `--color-text-secondary` |
-| `SettingRadioGroup` | `legend`, `name`, `value`, `options`, `onchange(value)` (generic over the option type)                              | `<fieldset>` + `<legend>` + native radios (arrow keys move the selection)                                                                                                                                                                                                                                                 |
+| Component           | Props                                                                                                                                   | Notes                                                                                                                                                                                                                                                                                                                     |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SettingsView`      | `settings`, `saving`, `saveFailed`, `loadFailed`, `notice`, `onheightchange`, `onchange(patch)`, `onback`, `onquit`, `onopenloginitems` | sections Thanh menu / Giao diện / Ổ đĩa / Hệ thống; skeleton while `settings` is null, `EmptyState` if `get_settings` failed; "Đang lưu…" in a `role="status"` line; inline `role="alert"` error after a failed save; launch-at-login hint and "Mở Cài đặt hệ thống" button (see below); quit button                      |
+| `SettingSwitch`     | `label`, `hint?`, `checked`, `disabled?`, `onchange(checked)`                                                                           | native `<input type="checkbox" role="switch" aria-checked>` with a `<label for>`; hint linked by `aria-describedby`; Enter toggles too; `disabled` sets the native attribute (announced as dimmed, skipped by Tab, no handler runs), dims the control with `--opacity-disabled` and the label to `--color-text-secondary` |
+| `SettingRadioGroup` | `legend`, `name`, `value`, `options`, `onchange(value)` (generic over the option type)                                                  | `<fieldset>` + `<legend>` + native radios (arrow keys move the selection)                                                                                                                                                                                                                                                 |
 
 The "Thanh menu" section holds, in order: the "Kiểu tiêu đề" radio group; a `role="group"` labelled
 "Chỉ số trên thanh menu" (a plain `<div>` with `aria-labelledby`, not a `<fieldset>`, so the known
@@ -261,6 +278,36 @@ At most one switch is locked at a time, and from any state Rust can send a switc
 as a result of its own toggle, so focus is never lost. The locked switch shows the hint "Thanh menu
 cần ít nhất một chỉ số hoặc biểu tượng" under its label through the existing `hint` prop, which
 links it with `aria-describedby`.
+
+The "Hệ thống" section holds "Tiết kiệm bộ nhớ" and "Khởi động cùng macOS". The launch switch is
+bound to `settings.launchAtLogin` (`checked`) and sends `{ launchAtLogin }`; everything else about it
+comes from `launchAtLoginUi(settings)` in `src/lib/launch-at-login.ts` (unit-tested for every status),
+which reads only `launchAtLoginStatus` and `launchAtLoginReason`:
+
+| Status             | Switch                                  | Hint (`hint` prop, linked by `aria-describedby`)                                                               | "Mở Cài đặt hệ thống" button |
+| ------------------ | --------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ---------------------------- |
+| `enabled`          | on, enabled                             | —                                                                                                              | —                            |
+| `disabled`         | off, enabled                            | —                                                                                                              | —                            |
+| `requiresApproval` | on (Rust sends `launchAtLogin: true`)   | "Cần cho phép Pulsebar trong Cài đặt hệ thống › Mục đăng nhập"                                                 | shown under the switch       |
+| `blocked`          | off, native `disabled` (skipped by Tab) | `launchAtLoginReason` from Rust as-is; when it is null or blank, "Không bật được khởi động cùng macOS lúc này" | —                            |
+
+While a save is in flight the switch follows the optimistic `launchAtLogin`, but the status (and so
+the hint and button) keeps the last value Rust sent; the store never guesses a status. A reason sent
+with any status other than `blocked` is ignored.
+
+The "Mở Cài đặt hệ thống" button is a native `<button type="button">` whose visible text is its
+accessible name, with a decorative `external-link` icon (`aria-hidden`). It sits after the switch in
+DOM and Tab order, is `align-self: flex-start`, and reuses the quit button's look: `--control-size`
+min height, `--space-2` / `--space-6` padding, `--color-border-subtle` border, `--radius-md`,
+`--color-surface-card` background with `--color-surface-hover` / `--color-surface-active` states,
+`--color-text-primary` text at `--font-size-md`, `--icon-size-sm` icon and the global
+`:focus-visible` ring. It calls `onopenloginitems`, which `App` maps to
+`store.openLoginItemsSettings()`; a failure shows the shell's action notice ("Không thực hiện được
+thao tác. Hãy thử lại."). After the user allows Pulsebar in System Settings, the next popover show
+refreshes settings and the status becomes `enabled`, which removes the hint and the button.
+
+No new colour pairs: the hint is `--color-text-tertiary` on the card (≥ 5.20:1 in every theme, see
+the contrast table) and the button text is `--color-text-primary` on the card (≥ 9.85:1).
 
 ## State, theming and accessibility
 
@@ -288,13 +335,17 @@ links it with `aria-describedby`.
 8. `updateSettings(patch)` applies the patch locally at once, then queues `set_settings({ settings })`
    with the full object (including the whole `titleMetrics`); saves run one at a time. Success
    replaces local settings with the value Rust returns; failure restores the last confirmed value and
-   sets `settingsError`.
-9. Every invoke is wrapped: failures never reject, they are logged once per failure streak with
-   `console.warn('[pulsebar] <command> failed: <message>')` (message truncated to 200 chars, no
-   arguments logged) and recorded in `failures`. `dataFailed` (snapshot / static info / listener
-   failure) and `actionFailed` (hide / quit / detail) drive the shell's notice banner; settings
-   failures show inline in the settings view.
-10. No timers anywhere in the store; `dispose()` removes all listeners (used by tests).
+   sets `settingsError`. The patch never touches `launchAtLoginStatus` / `launchAtLoginReason`:
+   toggling launch at login changes only `launchAtLogin` locally, and the returned payload brings the
+   real status and reason.
+9. Actions: `hide()` (`hide_popover`), `quit()` (`quit_app`) and `openLoginItemsSettings()`
+   (`open_login_items_settings`, no arguments) each invoke one command and resolve even on failure.
+10. Every invoke is wrapped: failures never reject, they are logged once per failure streak with
+    `console.warn('[pulsebar] <command> failed: <message>')` (message truncated to 200 chars, no
+    arguments logged) and recorded in `failures`. `dataFailed` (snapshot / static info / listener
+    failure) and `actionFailed` (hide / quit / detail / open Login Items) drive the shell's notice
+    banner; settings failures show inline in the settings view.
+11. No timers anywhere in the store; `dispose()` removes all listeners (used by tests).
 
 ### Theme, effects and visibility
 
@@ -338,6 +389,9 @@ card opens the detail view while the accessible control stays a real `<button>`.
 - `IconButton` always has an `aria-label`; icons are `aria-hidden`.
 - The menu bar metric switches sit in a `role="group"` named "Chỉ số trên thanh menu"; a locked switch
   uses the native `disabled` attribute and is described by the visible hint.
+- The launch-at-login switch follows the same pattern: `blocked` sets native `disabled` and the Rust
+  reason is its visible, `aria-describedby`-linked hint; `requiresApproval` keeps it operable, links
+  the approval hint and adds the "Mở Cài đặt hệ thống" button, named by its visible text.
 - Live regions: notice banner and settings save error are `role="alert"`; settings saving and disk
   updates are `role="status"`.
 
@@ -357,16 +411,17 @@ card opens the detail view while the accessible control stays a real `<button>`.
 dynamically. A production build replaces `import.meta.env.MODE` with `"production"`, the branch is
 removed and neither the mock module nor its JSON is emitted (`grep -r "i9-9880H" dist/` is empty).
 
-| Query parameter | Values                                         | Effect                                                                                                                          |
-| --------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `platform`      | `apple` (default), `intel`                     | Apple M3 Pro (6 E + 6 P, IOReport power and per-core MHz) or Intel i9-9880H (8 / 16, SMC PCPT package power, nominal frequency) |
-| `theme`         | `light`, `dark`                                | forces `settings.theme`; omitted → `system`                                                                                     |
-| `view`          | `overview` (default), `cpu-detail`, `settings` | initial view                                                                                                                    |
-| `wifi`          | `off`                                          | Wi-Fi disconnected                                                                                                              |
-| `power`         | `unavailable`                                  | power `unavailable` with the VM reason                                                                                          |
-| `temperature`   | `unavailable`                                  | temperature `unavailable` with "Model Mac này không cung cấp cảm biến nhiệt độ CPU"                                             |
-| `state`         | `loading`                                      | `get_static_info` / `get_snapshot` return `null`, no snapshots are pushed (skeletons)                                           |
-| `rosetta`       | `on`                                           | `translated: true`; power, frequency and temperature unavailable with the Rosetta reason (wins over `temperature`)              |
+| Query parameter | Values                                         | Effect                                                                                                                                                                                            |
+| --------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `platform`      | `apple` (default), `intel`                     | Apple M3 Pro (6 E + 6 P, IOReport power and per-core MHz) or Intel i9-9880H (8 / 16, SMC PCPT package power, nominal frequency)                                                                   |
+| `theme`         | `light`, `dark`                                | forces `settings.theme`; omitted → `system`                                                                                                                                                       |
+| `view`          | `overview` (default), `cpu-detail`, `settings` | initial view                                                                                                                                                                                      |
+| `wifi`          | `off`                                          | Wi-Fi disconnected                                                                                                                                                                                |
+| `power`         | `unavailable`                                  | power `unavailable` with the VM reason                                                                                                                                                            |
+| `temperature`   | `unavailable`                                  | temperature `unavailable` with "Model Mac này không cung cấp cảm biến nhiệt độ CPU"                                                                                                               |
+| `state`         | `loading`                                      | `get_static_info` / `get_snapshot` return `null`, no snapshots are pushed (skeletons)                                                                                                             |
+| `rosetta`       | `on`                                           | `translated: true`; power, frequency and temperature unavailable with the Rosetta reason (wins over `temperature`)                                                                                |
+| `login`         | `requiresApproval`, `blocked`                  | launch at login starts as `requiresApproval` (`launchAtLogin: true`) or `blocked` (`launchAtLogin: false`, reason "Hãy chép Pulsebar vào thư mục Applications rồi bật lại"); omitted → `disabled` |
 
 Unknown values fall back to the defaults. Example:
 `http://localhost:1420/?platform=intel&theme=dark&view=cpu-detail`.
@@ -389,3 +444,12 @@ so sparklines start full, then a self-rescheduling `setTimeout` pushes a jittere
 around the fixture value, clamped to 30–100 °C. `cpu.cores` is filled only after
 `set_detail_enabled(true)`, network shares appear only when "Hiện ổ mạng" is on (toggling it emits
 `disks://changed`), and `hide_popover`, `resize_popover` and `quit_app` are no-ops.
+
+Launch at login in the mock: `set_settings` recomputes the three launch fields from the requested
+`launchAtLogin` alone, never from the status or reason the client sends. With `login=blocked` they
+stay `false` / `blocked` / the reason whatever is sent; otherwise `true` gives `enabled` (or
+`requiresApproval` with `login=requiresApproval`), `false` gives `disabled`, and the reason is
+`null`. `open_login_items_settings` is a no-op that resolves `undefined` and does not change the
+status, so the button stays visible in the `requiresApproval` scenario. The scenarios match the
+`launchAtLoginBlocked` / `launchAtLoginRequiresApproval` contract fixtures in
+`src/mocks/contract-settings.json` (checked in `src/mocks/fixtures.test.ts`).

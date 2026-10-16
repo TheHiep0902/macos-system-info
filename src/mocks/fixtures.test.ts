@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { COMMANDS, EVENTS } from '../lib/ipc';
-import type { Snapshot, StaticInfo } from '../lib/types';
+import type { Settings, Snapshot, StaticInfo } from '../lib/types';
+import settingsContract from './contract-settings.json';
 import appleSnapshot from './snapshot-apple-silicon.json';
 import intelSnapshot from './snapshot-intel.json';
 import appleStatic from './static-apple-silicon.json';
@@ -103,7 +104,7 @@ describe('parseScenario', () => {
   it('reads every supported query parameter', () => {
     const scenario = parseScenario(
       new URLSearchParams(
-        'platform=intel&theme=dark&view=cpu-detail&wifi=off&power=unavailable&temperature=unavailable&state=loading&rosetta=on',
+        'platform=intel&theme=dark&view=cpu-detail&wifi=off&power=unavailable&temperature=unavailable&state=loading&rosetta=on&login=requiresApproval',
       ),
     );
     expect(scenario).toEqual({
@@ -115,12 +116,19 @@ describe('parseScenario', () => {
       temperatureUnavailable: true,
       loading: true,
       rosetta: true,
+      login: 'requiresApproval',
     });
+  });
+
+  it('reads the blocked launch-at-login scenario', () => {
+    expect(parseScenario(new URLSearchParams('login=blocked')).login).toBe('blocked');
   });
 
   it('falls back to defaults for unknown values', () => {
     expect(
-      parseScenario(new URLSearchParams('platform=arm&theme=blue&view=../x&temperature=off')),
+      parseScenario(
+        new URLSearchParams('platform=arm&theme=blue&view=../x&temperature=off&login=enabled'),
+      ),
     ).toEqual({
       platform: 'apple',
       theme: null,
@@ -130,7 +138,106 @@ describe('parseScenario', () => {
       temperatureUnavailable: false,
       loading: false,
       rosetta: false,
+      login: null,
     });
+  });
+});
+
+describe('mock backend launch at login', () => {
+  type LaunchFields = Pick<
+    Settings,
+    'launchAtLogin' | 'launchAtLoginStatus' | 'launchAtLoginReason'
+  >;
+
+  const DISABLED: LaunchFields = {
+    launchAtLogin: false,
+    launchAtLoginStatus: 'disabled',
+    launchAtLoginReason: null,
+  };
+  const ENABLED: LaunchFields = {
+    launchAtLogin: true,
+    launchAtLoginStatus: 'enabled',
+    launchAtLoginReason: null,
+  };
+  const BLOCKED = settingsContract.launchAtLoginBlocked as LaunchFields;
+  const REQUIRES_APPROVAL = settingsContract.launchAtLoginRequiresApproval as LaunchFields;
+
+  function launchFields(settings: Settings): LaunchFields {
+    return {
+      launchAtLogin: settings.launchAtLogin,
+      launchAtLoginStatus: settings.launchAtLoginStatus,
+      launchAtLoginReason: settings.launchAtLoginReason,
+    };
+  }
+
+  async function initial(query: string): Promise<Settings> {
+    const { transport } = createMockTransport(new URLSearchParams(query));
+    return transport.invoke<Settings>(COMMANDS.getSettings);
+  }
+
+  async function save(query: string, patch: Partial<Settings>): Promise<Settings> {
+    const { transport } = createMockTransport(new URLSearchParams(query));
+    const current = await transport.invoke<Settings>(COMMANDS.getSettings);
+    return transport.invoke<Settings>(COMMANDS.setSettings, {
+      settings: { ...current, ...patch },
+    });
+  }
+
+  it.each([
+    ['', DISABLED],
+    ['login=requiresApproval', REQUIRES_APPROVAL],
+    ['login=blocked', BLOCKED],
+  ])('starts from the scenario %j', async (query, expected) => {
+    expect(launchFields(await initial(query))).toEqual(expected);
+  });
+
+  it.each([
+    ['', true, ENABLED],
+    ['', false, DISABLED],
+    ['login=requiresApproval', true, REQUIRES_APPROVAL],
+    ['login=requiresApproval', false, DISABLED],
+    ['login=blocked', true, BLOCKED],
+    ['login=blocked', false, BLOCKED],
+  ])(
+    'recomputes the status in scenario %j when launchAtLogin is %s',
+    async (query, on, expected) => {
+      expect(launchFields(await save(query, { launchAtLogin: on }))).toEqual(expected);
+    },
+  );
+
+  it('never trusts the output-only status and reason sent by the client', async () => {
+    const forged: Partial<Settings> = {
+      launchAtLoginStatus: 'blocked',
+      launchAtLoginReason: 'forged',
+    };
+    expect(launchFields(await save('', { ...forged, launchAtLogin: true }))).toEqual(ENABLED);
+    expect(launchFields(await save('', { ...forged, launchAtLogin: false }))).toEqual(DISABLED);
+    expect(
+      launchFields(
+        await save('login=blocked', {
+          launchAtLogin: true,
+          launchAtLoginStatus: 'enabled',
+          launchAtLoginReason: null,
+        }),
+      ),
+    ).toEqual(BLOCKED);
+  });
+
+  it('keeps the recomputed status for the next get_settings', async () => {
+    const { transport } = createMockTransport(new URLSearchParams('login=requiresApproval'));
+    const current = await transport.invoke<Settings>(COMMANDS.getSettings);
+    await transport.invoke(COMMANDS.setSettings, {
+      settings: { ...current, launchAtLogin: false },
+    });
+    expect(launchFields(await transport.invoke<Settings>(COMMANDS.getSettings))).toEqual(DISABLED);
+  });
+
+  it('treats open_login_items_settings as a no-op', async () => {
+    const { transport } = createMockTransport(new URLSearchParams('login=requiresApproval'));
+    await expect(transport.invoke(COMMANDS.openLoginItemsSettings)).resolves.toBeUndefined();
+    expect(launchFields(await transport.invoke<Settings>(COMMANDS.getSettings))).toEqual(
+      REQUIRES_APPROVAL,
+    );
   });
 });
 

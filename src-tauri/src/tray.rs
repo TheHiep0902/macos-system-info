@@ -6,6 +6,7 @@ use tauri::menu::{CheckMenuItem, CheckMenuItemBuilder, MenuBuilder, MenuEvent, M
 use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, Runtime};
 
+use crate::login_item::LaunchAtLoginStatus;
 use crate::model::{MetricState, PowerSample, TemperatureSample};
 use crate::popover::{self, Anchor, RequestedView};
 
@@ -154,7 +155,7 @@ fn handle_menu<R: Runtime>(app: &AppHandle<R>, event: &MenuEvent) {
         MENU_OPEN => popover::show(app, Anchor::Tray, Some(RequestedView::Overview)),
         MENU_SETTINGS => popover::show(app, Anchor::Tray, Some(RequestedView::Settings)),
         MENU_LAUNCH_AT_LOGIN => {
-            let target = !crate::settings::launch_at_login(app);
+            let target = !crate::settings::launch_at_login().status.is_on();
             crate::settings::set_launch_at_login(app, target);
             popover::refresh_if_visible(app);
         }
@@ -178,10 +179,11 @@ fn handle_tray_event<R: Runtime>(tray: &TrayIcon<R>, event: TrayIconEvent) {
 pub fn create<R: Runtime>(
     app: &AppHandle<R>,
     show_icon: bool,
-    launch_at_login: bool,
+    launch_at_login: LaunchAtLoginStatus,
 ) -> tauri::Result<(TrayIcon<R>, TrayMenu<R>)> {
     let launch_item = CheckMenuItemBuilder::with_id(MENU_LAUNCH_AT_LOGIN, "Khởi động cùng macOS")
-        .checked(launch_at_login)
+        .checked(launch_at_login.is_on())
+        .enabled(launch_at_login != LaunchAtLoginStatus::Blocked)
         .build(app)?;
     let menu = MenuBuilder::new(app)
         .item(&MenuItemBuilder::with_id(MENU_OPEN, "Mở Pulsebar").build(app)?)
@@ -222,10 +224,18 @@ pub fn set_icon_visible<R: Runtime>(tray: &TrayIcon<R>, visible: bool) -> tauri:
     tray.set_icon_with_as_template(icon, true)
 }
 
-pub fn sync_launch_at_login<R: Runtime>(app: &AppHandle<R>, enabled: bool) {
-    if let Some(menu) = app.try_state::<TrayMenu<R>>()
-        && let Err(err) = menu.launch_at_login.set_checked(enabled)
-    {
+pub fn sync_launch_at_login<R: Runtime>(app: &AppHandle<R>, status: LaunchAtLoginStatus) {
+    let Some(menu) = app.try_state::<TrayMenu<R>>() else {
+        return;
+    };
+    let result = menu
+        .launch_at_login
+        .set_checked(status.is_on())
+        .and_then(|()| {
+            menu.launch_at_login
+                .set_enabled(status != LaunchAtLoginStatus::Blocked)
+        });
+    if let Err(err) = result {
         log::warn!("could not update the launch-at-login menu item: {err}");
     }
 }

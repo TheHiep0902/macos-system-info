@@ -3,11 +3,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use tauri::{AppHandle, Emitter, Runtime, State};
 
+use crate::login_item;
 use crate::model::{Snapshot, StaticInfo};
 use crate::popover;
 use crate::sampler::{SharedState, Sink};
 use crate::settings::{self, SettingsPayload, SettingsStore};
-use crate::tray::TRAY_ID;
+use crate::tray::{self, TRAY_ID};
 
 pub const POPOVER_LABEL: &str = "popover";
 pub const EVENT_SNAPSHOT: &str = "metrics://snapshot";
@@ -38,10 +39,9 @@ pub fn get_settings<R: Runtime>(
     app: AppHandle<R>,
     store: State<'_, SettingsStore>,
 ) -> SettingsPayload {
-    SettingsPayload {
-        settings: store.get(),
-        launch_at_login: settings::launch_at_login(&app),
-    }
+    let launch = settings::launch_at_login();
+    tray::sync_launch_at_login(&app, launch.status);
+    SettingsPayload::new(store.get(), launch)
 }
 
 #[tauri::command]
@@ -57,11 +57,13 @@ pub fn set_settings<R: Runtime>(
         SETTINGS_SAVE_FAILED.to_owned()
     })?;
     settings::apply(&app, &previous, &next);
-    let launch_at_login = settings::set_launch_at_login(&app, settings.launch_at_login);
-    Ok(SettingsPayload {
-        settings: store.get(),
-        launch_at_login,
-    })
+    let launch = settings::set_launch_at_login(&app, settings.launch_at_login);
+    Ok(SettingsPayload::new(store.get(), launch))
+}
+
+#[tauri::command]
+pub fn open_login_items_settings() {
+    login_item::open_system_settings();
 }
 
 #[tauri::command]
@@ -133,5 +135,42 @@ impl<R: Runtime> Sink for TauriSink<R> {
 
     fn emit_disks_changed(&self) {
         self.emit(EVENT_DISKS_CHANGED, ());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    const BUILD_SCRIPT: &str = include_str!("../build.rs");
+    const CAPABILITY: &str = include_str!("../capabilities/default.json");
+
+    fn app_commands() -> BTreeSet<String> {
+        let start = BUILD_SCRIPT
+            .find("APP_COMMANDS")
+            .expect("build.rs declares APP_COMMANDS");
+        let list = &BUILD_SCRIPT[start..];
+        let list = &list[..list.find("];").expect("APP_COMMANDS is closed")];
+        list.split('"')
+            .skip(1)
+            .step_by(2)
+            .map(str::to_owned)
+            .collect()
+    }
+
+    #[test]
+    fn capability_allows_exactly_the_app_commands() {
+        let capability: serde_json::Value =
+            serde_json::from_str(CAPABILITY).expect("capability is valid JSON");
+        let allowed: BTreeSet<String> = capability["permissions"]
+            .as_array()
+            .expect("permissions array")
+            .iter()
+            .filter_map(|permission| permission.as_str()?.strip_prefix("allow-"))
+            .map(|command| command.replace('-', "_"))
+            .collect();
+        let commands = app_commands();
+        assert!(commands.contains("open_login_items_settings"));
+        assert_eq!(allowed, commands);
     }
 }

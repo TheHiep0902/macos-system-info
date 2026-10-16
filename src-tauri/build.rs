@@ -7,6 +7,7 @@ const APP_COMMANDS: &[&str] = &[
     "hide_popover",
     "resize_popover",
     "quit_app",
+    "open_login_items_settings",
 ];
 
 fn main() {

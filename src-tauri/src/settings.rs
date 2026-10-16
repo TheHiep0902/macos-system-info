@@ -8,9 +8,9 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use tauri::{AppHandle, Manager, Runtime};
-use tauri_plugin_autostart::ManagerExt;
 
 use crate::ipc::AppState;
+use crate::login_item::{self, LaunchAtLoginStatus, LaunchState, LoginAction};
 use crate::popover;
 use crate::sampler::SharedState;
 use crate::tray::{self, TRAY_ID, TitleMetrics};
@@ -78,6 +78,21 @@ pub struct SettingsPayload {
     #[serde(flatten)]
     pub settings: Settings,
     pub launch_at_login: bool,
+    #[serde(default, skip_deserializing)]
+    pub launch_at_login_status: LaunchAtLoginStatus,
+    #[serde(default, skip_deserializing)]
+    pub launch_at_login_reason: Option<String>,
+}
+
+impl SettingsPayload {
+    pub fn new(settings: Settings, launch: LaunchState) -> Self {
+        SettingsPayload {
+            settings,
+            launch_at_login: launch.status.is_on(),
+            launch_at_login_status: launch.status,
+            launch_at_login_reason: launch.reason.map(str::to_owned),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -258,27 +273,36 @@ pub fn apply<R: Runtime>(app: &AppHandle<R>, previous: &Settings, next: &Setting
     }
 }
 
-pub fn launch_at_login<R: Runtime>(app: &AppHandle<R>) -> bool {
-    app.autolaunch().is_enabled().unwrap_or_else(|err| {
-        log::warn!("could not read launch-at-login state: {err}");
-        false
-    })
+pub fn launch_at_login() -> LaunchState {
+    login_item::current_state()
 }
 
-pub fn set_launch_at_login<R: Runtime>(app: &AppHandle<R>, enabled: bool) -> bool {
-    if launch_at_login(app) != enabled {
-        let manager = app.autolaunch();
-        let result = if enabled {
-            manager.enable()
-        } else {
-            manager.disable()
-        };
-        if let Err(err) = result {
-            log::warn!("could not change launch-at-login: {err}");
+pub fn set_launch_at_login<R: Runtime>(app: &AppHandle<R>, enabled: bool) -> LaunchState {
+    let issue = login_item::current_location_issue();
+    let status = login_item::status();
+    let action = login_item::login_action(enabled, status, issue);
+    log::debug!("launch-at-login requested {enabled}: {action:?}");
+    let result = match action {
+        LoginAction::Noop => Ok(()),
+        LoginAction::Register => login_item::register(),
+        LoginAction::Unregister => login_item::unregister(),
+        LoginAction::Blocked => {
+            log::info!(
+                "launch at login unavailable here: {}",
+                issue.unwrap_or_default()
+            );
+            Ok(())
         }
+    };
+    if let Err(err) = result {
+        log::warn!("could not change launch-at-login: {err}");
     }
-    let actual = launch_at_login(app);
-    tray::sync_launch_at_login(app, actual);
+    let status = match action {
+        LoginAction::Register | LoginAction::Unregister => login_item::status(),
+        LoginAction::Noop | LoginAction::Blocked => status,
+    };
+    let actual = login_item::launch_state(status, issue);
+    tray::sync_launch_at_login(app, actual.status);
     actual
 }
 
@@ -332,17 +356,18 @@ mod tests {
         }
     }
 
+    fn launch(status: LaunchAtLoginStatus, reason: Option<&'static str>) -> LaunchState {
+        LaunchState { status, reason }
+    }
+
     #[test]
     fn payload_matches_contract_fixture() {
-        let payload = SettingsPayload {
-            settings: custom(),
-            launch_at_login: true,
-        };
+        let payload = SettingsPayload::new(custom(), launch(LaunchAtLoginStatus::Enabled, None));
         assert_eq!(serde_json::to_value(&payload).unwrap(), fixture("settings"));
-        let defaults = SettingsPayload {
-            settings: Settings::default(),
-            launch_at_login: false,
-        };
+        let defaults = SettingsPayload::new(
+            Settings::default(),
+            launch(LaunchAtLoginStatus::Disabled, None),
+        );
         assert_eq!(
             serde_json::to_value(&defaults).unwrap(),
             fixture("defaultSettings")
@@ -350,10 +375,52 @@ mod tests {
     }
 
     #[test]
+    fn launch_at_login_variants_match_contract_fixture() {
+        let blocked = SettingsPayload::new(
+            Settings::default(),
+            launch(
+                LaunchAtLoginStatus::Blocked,
+                Some(login_item::ISSUE_MOVE_TO_APPLICATIONS),
+            ),
+        );
+        let approval = SettingsPayload::new(
+            Settings::default(),
+            launch(LaunchAtLoginStatus::RequiresApproval, None),
+        );
+        for (payload, key) in [
+            (blocked, "launchAtLoginBlocked"),
+            (approval, "launchAtLoginRequiresApproval"),
+        ] {
+            let value = serde_json::to_value(&payload).unwrap();
+            let expected = fixture(key);
+            for field in [
+                "launchAtLogin",
+                "launchAtLoginStatus",
+                "launchAtLoginReason",
+            ] {
+                assert_eq!(value[field], expected[field], "{key}.{field}");
+            }
+        }
+    }
+
+    #[test]
     fn payload_round_trips_from_frontend_json() {
         let parsed: SettingsPayload = serde_json::from_value(fixture("settings")).unwrap();
         assert_eq!(parsed.settings, custom());
         assert!(parsed.launch_at_login);
+    }
+
+    #[test]
+    fn output_only_launch_fields_are_ignored_on_input() {
+        let mut value = fixture("defaultSettings");
+        value["launchAtLoginStatus"] = Value::from("enabled");
+        value["launchAtLoginReason"] = Value::from("forged");
+        let parsed: SettingsPayload = serde_json::from_value(value).unwrap();
+        assert_eq!(parsed.launch_at_login_status, LaunchAtLoginStatus::Disabled);
+        assert_eq!(parsed.launch_at_login_reason, None);
+        let mut invalid = fixture("defaultSettings");
+        invalid["launchAtLoginStatus"] = Value::from(42);
+        assert!(serde_json::from_value::<SettingsPayload>(invalid).is_ok());
     }
 
     #[test]

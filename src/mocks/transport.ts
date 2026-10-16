@@ -24,7 +24,15 @@ export interface MockScenario {
   temperatureUnavailable: boolean;
   loading: boolean;
   rosetta: boolean;
+  login: LoginScenario | null;
 }
+
+export type LoginScenario = 'requiresApproval' | 'blocked';
+
+type LaunchAtLoginFields = Pick<
+  Settings,
+  'launchAtLogin' | 'launchAtLoginStatus' | 'launchAtLoginReason'
+>;
 
 const TICK_MS = 2000;
 const HISTORY_POINTS = 60;
@@ -35,6 +43,8 @@ const TEMPERATURE_MIN = 30;
 const TEMPERATURE_MAX = 100;
 const ROSETTA_REASON = 'Đang chạy qua Rosetta – hãy mở bản native';
 const VIEWS: readonly PopoverView[] = ['overview', 'cpu-detail', 'settings'];
+const LOGIN_SCENARIOS: readonly LoginScenario[] = ['requiresApproval', 'blocked'];
+const LOGIN_BLOCKED_REASON = 'Hãy chép Pulsebar vào thư mục Applications rồi bật lại';
 
 const DEFAULT_SETTINGS: Settings = {
   titleFormat: 'default',
@@ -45,6 +55,8 @@ const DEFAULT_SETTINGS: Settings = {
   showNetworkDisks: false,
   memorySaver: false,
   launchAtLogin: false,
+  launchAtLoginStatus: 'disabled',
+  launchAtLoginReason: null,
 };
 
 function pick<T extends string>(value: string | null, allowed: readonly T[]): T | null {
@@ -61,6 +73,25 @@ export function parseScenario(params: URLSearchParams): MockScenario {
     temperatureUnavailable: params.get('temperature') === 'unavailable',
     loading: params.get('state') === 'loading',
     rosetta: params.get('rosetta') === 'on',
+    login: pick(params.get('login'), LOGIN_SCENARIOS),
+  };
+}
+
+function launchAtLoginFields(login: LoginScenario | null, requested: boolean): LaunchAtLoginFields {
+  if (login === 'blocked') {
+    return {
+      launchAtLogin: false,
+      launchAtLoginStatus: 'blocked',
+      launchAtLoginReason: LOGIN_BLOCKED_REASON,
+    };
+  }
+  if (!requested) {
+    return { launchAtLogin: false, launchAtLoginStatus: 'disabled', launchAtLoginReason: null };
+  }
+  return {
+    launchAtLogin: true,
+    launchAtLoginStatus: login === 'requiresApproval' ? 'requiresApproval' : 'enabled',
+    launchAtLoginReason: null,
   };
 }
 
@@ -96,7 +127,11 @@ class MockBackend {
     const apple = scenario.platform === 'apple';
     const staticInfo = (apple ? appleStaticJson : intelStaticJson) as StaticInfo;
     this.#staticInfo = { ...staticInfo, translated: scenario.rosetta };
-    this.#settings = { ...DEFAULT_SETTINGS, theme: scenario.theme ?? DEFAULT_SETTINGS.theme };
+    this.#settings = {
+      ...DEFAULT_SETTINGS,
+      theme: scenario.theme ?? DEFAULT_SETTINGS.theme,
+      ...launchAtLoginFields(scenario.login, scenario.login === 'requiresApproval'),
+    };
     const snapshot = (apple ? appleSnapshotJson : intelSnapshotJson) as Snapshot;
     this.#temperatureBase =
       snapshot.temperature.state === 'ok' ? snapshot.temperature.celsius : null;
@@ -142,6 +177,8 @@ class MockBackend {
       case COMMANDS.resizePopover:
       case COMMANDS.quitApp:
         return null;
+      case COMMANDS.openLoginItemsSettings:
+        return undefined;
       default:
         throw new Error(`mock: unknown command ${command}`);
     }
@@ -163,7 +200,11 @@ class MockBackend {
     if (typeof value !== 'object' || value === null) {
       throw new Error('mock: settings must be an object');
     }
-    const next = { ...this.#settings, ...(value as Partial<Settings>) };
+    const merged: Settings = { ...this.#settings, ...(value as Partial<Settings>) };
+    const next: Settings = {
+      ...merged,
+      ...launchAtLoginFields(this.#scenario.login, merged.launchAtLogin === true),
+    };
     const disksChanged = next.showNetworkDisks !== this.#settings.showNetworkDisks;
     this.#settings = next;
     if (disksChanged) {

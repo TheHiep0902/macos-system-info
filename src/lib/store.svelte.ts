@@ -27,6 +27,7 @@ const ACTION_COMMANDS: readonly CommandName[] = [
   COMMANDS.hidePopover,
   COMMANDS.quitApp,
   COMMANDS.setDetailEnabled,
+  COMMANDS.openLoginItemsSettings,
 ];
 
 function appendBounded(values: readonly number[], value: number): readonly number[] {
@@ -161,6 +162,10 @@ export class PopoverStore {
 
   async quit(): Promise<void> {
     await this.#call<void>(COMMANDS.quitApp);
+  }
+
+  async openLoginItemsSettings(): Promise<void> {
+    await this.#call<void>(COMMANDS.openLoginItemsSettings);
   }
 
   async resize(contentHeight: number): Promise<void> {

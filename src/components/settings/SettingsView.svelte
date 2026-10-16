@@ -1,7 +1,9 @@
 <script lang="ts">
+  import ExternalLink from '@lucide/svelte/icons/external-link';
   import Power from '@lucide/svelte/icons/power';
   import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
   import { t } from '../../lib/i18n';
+  import { launchAtLoginUi } from '../../lib/launch-at-login';
   import { menuBarLocks, type TitleMetricKey } from '../../lib/title-metrics';
   import type { Settings, ThemePreference, TitleFormat } from '../../lib/types';
   import PopoverShell from '../layout/PopoverShell.svelte';
@@ -21,6 +23,7 @@
     onchange: (patch: Partial<Settings>) => void;
     onback: () => void;
     onquit: () => void;
+    onopenloginitems: () => void;
   }
 
   let {
@@ -33,6 +36,7 @@
     onchange,
     onback,
     onquit,
+    onopenloginitems,
   }: Props = $props();
 
   const uid = $props.id();
@@ -72,6 +76,7 @@
     {/if}
   {:else}
     {@const locks = menuBarLocks(settings)}
+    {@const launch = launchAtLoginUi(settings)}
     <section class="section" aria-labelledby={`${uid}-menu-bar`}>
       <h2 class="section-title" id={`${uid}-menu-bar`}>{t('settings.menuBar')}</h2>
       <SettingRadioGroup
@@ -139,9 +144,17 @@
       />
       <SettingSwitch
         label={t('settings.launchAtLogin')}
+        hint={launch.hint}
         checked={settings.launchAtLogin}
+        disabled={launch.disabled}
         onchange={(launchAtLogin) => onchange({ launchAtLogin })}
       />
+      {#if launch.showOpenSettings}
+        <button type="button" class="open-settings" onclick={onopenloginitems}>
+          <ExternalLink class="open-settings-icon" aria-hidden="true" />
+          {t('settings.launchAtLogin.openSettings')}
+        </button>
+      {/if}
     </section>
 
     <p class="metric-note" role="status">{saving ? t('settings.saving') : ''}</p>
@@ -191,6 +204,35 @@
   .error {
     color: var(--color-status-critical);
     font-size: var(--font-size-sm);
+  }
+
+  .open-settings {
+    display: inline-flex;
+    align-self: flex-start;
+    align-items: center;
+    gap: var(--space-3);
+    min-height: var(--control-size);
+    padding: var(--space-2) var(--space-6);
+    border: var(--border-width) solid var(--color-border-subtle);
+    border-radius: var(--radius-md);
+    background: var(--color-surface-card);
+    color: var(--color-text-primary);
+    font-size: var(--font-size-md);
+    transition: background-color var(--duration-fast) var(--easing-standard);
+  }
+
+  .open-settings:hover {
+    background: var(--color-surface-hover);
+  }
+
+  .open-settings:active {
+    background: var(--color-surface-active);
+  }
+
+  .open-settings :global(.open-settings-icon) {
+    flex: none;
+    width: var(--icon-size-sm);
+    height: var(--icon-size-sm);
   }
 
   .quit {

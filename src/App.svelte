@@ -88,6 +88,10 @@
     void store.quit();
   }
 
+  function openLoginItemsSettings(): void {
+    void store.openLoginItemsSettings();
+  }
+
   function onKeydown(event: KeyboardEvent): void {
     if (event.key === 'Escape' && !event.defaultPrevented) {
       event.preventDefault();
@@ -117,6 +121,7 @@
     onchange={updateSettings}
     onback={() => void navigate('overview')}
     onquit={quit}
+    onopenloginitems={openLoginItemsSettings}
   />
 {:else}
   <PopoverShell

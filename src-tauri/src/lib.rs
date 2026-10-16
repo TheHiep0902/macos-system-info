@@ -1,6 +1,7 @@
 #[cfg(target_arch = "x86_64")]
 pub mod ioreport;
 pub mod ipc;
+pub mod login_item;
 pub mod model;
 pub mod platform;
 pub mod popover;
@@ -19,7 +20,6 @@ use std::time::Duration;
 
 use tauri::tray::TrayIcon;
 use tauri::{ActivationPolicy, AppHandle, Manager, RunEvent, Runtime};
-use tauri_plugin_autostart::MacosLauncher;
 
 use crate::ipc::{AppState, TauriSink};
 use crate::popover::{Anchor, PopoverState};
@@ -87,10 +87,6 @@ pub fn run() {
                 log::warn!("could not open the popover for a second launch: {err}");
             }
         }))
-        .plugin(tauri_plugin_autostart::init(
-            MacosLauncher::LaunchAgent,
-            None,
-        ))
         .manage(AppState(Arc::clone(&shared)))
         .manage(PopoverState::default())
         .invoke_handler(tauri::generate_handler![
@@ -101,7 +97,8 @@ pub fn run() {
             ipc::set_settings,
             ipc::hide_popover,
             ipc::resize_popover,
-            ipc::quit_app
+            ipc::quit_app,
+            ipc::open_login_items_settings
         ])
         .setup(|app| {
             app.set_activation_policy(ActivationPolicy::Accessory);
@@ -113,7 +110,7 @@ pub fn run() {
             let (tray, menu) = tray::create(
                 handle,
                 current.show_tray_icon,
-                settings::launch_at_login(handle),
+                settings::launch_at_login().status,
             )?;
             app.manage(TrayHandle { _tray: tray });
             app.manage(menu);

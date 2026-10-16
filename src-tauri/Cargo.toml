@@ -17,7 +17,6 @@ tauri-build = { version = "2.7.2", features = [] }
 [dependencies]
 tauri = { version = "~2.12.3", features = ["tray-icon", "macos-private-api", "image-png"] }
 tauri-plugin-single-instance = "2.5.3"
-tauri-plugin-autostart = "2.7.0"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 thiserror = "2.0.21"
@@ -61,6 +60,13 @@ objc2-io-kit = { version = "0.3.2", default-features = false, features = [
     "std",
     "libc",
     "pwr_mgt",
+] }
+objc2-service-management = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "SMAppService",
+    "SMErrors",
+    "objc2",
+    "objc2-foundation",
 ] }
 objc2-system-configuration = { version = "0.3.2", default-features = false, features = [
     "std",

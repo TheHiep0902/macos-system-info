@@ -7,6 +7,7 @@ export const COMMANDS = {
   hidePopover: 'hide_popover',
   resizePopover: 'resize_popover',
   quitApp: 'quit_app',
+  openLoginItemsSettings: 'open_login_items_settings',
 } as const;
 
 export const EVENTS = {

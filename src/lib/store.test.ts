@@ -396,6 +396,49 @@ describe('PopoverStore commands', () => {
     expect(store.actionFailed).toBe(false);
   });
 
+  it('keeps the launch-at-login status until Rust returns the real one', async () => {
+    const transport = createTransport();
+    const approval = settingsContract.launchAtLoginRequiresApproval as Partial<Settings>;
+    transport.responders.set(COMMANDS.setSettings, (args) => ({
+      ...(args?.['settings'] as Settings),
+      ...approval,
+    }));
+    const store = new PopoverStore(transport);
+    await store.init();
+
+    const pending = store.updateSettings({ launchAtLogin: true });
+    expect(store.settings?.launchAtLogin).toBe(true);
+    expect(store.settings?.launchAtLoginStatus).toBe('disabled');
+    expect(store.settings?.launchAtLoginReason).toBeNull();
+    await pending;
+
+    expect(transport.callsTo(COMMANDS.setSettings)[0]?.args).toEqual({
+      settings: { ...defaultSettings, launchAtLogin: true },
+    });
+    expect(store.settings).toEqual({ ...defaultSettings, ...approval });
+  });
+
+  it('opens the Login Items settings and reports a failure as an action failure', async () => {
+    const transport = createTransport();
+    transport.responders.set(COMMANDS.openLoginItemsSettings, () => {
+      throw new Error('no settings app');
+    });
+    const store = new PopoverStore(transport);
+    await store.init();
+
+    await expect(store.openLoginItemsSettings()).resolves.toBeUndefined();
+    expect(transport.callsTo(COMMANDS.openLoginItemsSettings)).toEqual([
+      { command: COMMANDS.openLoginItemsSettings, args: undefined },
+    ]);
+    expect(store.failures).toEqual([COMMANDS.openLoginItemsSettings]);
+    expect(store.actionFailed).toBe(true);
+    expect(store.dataFailed).toBe(false);
+
+    transport.responders.set(COMMANDS.openLoginItemsSettings, () => undefined);
+    await store.openLoginItemsSettings();
+    expect(store.actionFailed).toBe(false);
+  });
+
   it('reports data failures when the initial snapshot cannot be read', async () => {
     const transport = createTransport();
     transport.responders.set(COMMANDS.getSnapshot, () => {

@@ -7,7 +7,9 @@
     "reduceEffects": true,
     "showNetworkDisks": true,
     "memorySaver": true,
-    "launchAtLogin": true
+    "launchAtLogin": true,
+    "launchAtLoginStatus": "enabled",
+    "launchAtLoginReason": null
   },
   "defaultSettings": {
     "titleFormat": "default",
@@ -17,7 +19,19 @@
     "reduceEffects": false,
     "showNetworkDisks": false,
     "memorySaver": false,
-    "launchAtLogin": false
+    "launchAtLogin": false,
+    "launchAtLoginStatus": "disabled",
+    "launchAtLoginReason": null
+  },
+  "launchAtLoginBlocked": {
+    "launchAtLogin": false,
+    "launchAtLoginStatus": "blocked",
+    "launchAtLoginReason": "Hãy chép Pulsebar vào thư mục Applications rồi bật lại"
+  },
+  "launchAtLoginRequiresApproval": {
+    "launchAtLogin": true,
+    "launchAtLoginStatus": "requiresApproval",
+    "launchAtLoginReason": null
   },
   "visibilityShown": { "visible": true, "view": "settings" },
   "visibilityHidden": { "visible": false, "view": null }

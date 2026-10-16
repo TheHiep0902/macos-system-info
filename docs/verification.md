@@ -217,3 +217,72 @@ other work running; CPU 20–60 % at "idle").
 - A real Intel Mac (`TCXC` on genuine hardware); this host's values come from VirtualSMC.
 - Rosetta and virtual machines at runtime (covered by unit tests and the mock only).
 - VoiceOver reading of the new card and switches (semantics checked in code and the accessibility tree).
+
+## D5 — launch at login through SMAppService (`fix/launch-at-login`)
+
+Date: 2026-10-15/16. Release x86_64 bundles signed ad-hoc with the hardened runtime
+(`bundle.macOS.signingIdentity = "-"`, `hardenedRuntime: true`), run from
+`src-tauri/target/x86_64-apple-darwin/release/bundle/macos/Pulsebar.app` (not copied to
+`/Applications`) with `RUST_LOG=pulsebar=debug`. Toggles were driven through the tray menu and the
+popover with the CGEvent helpers; System Settings › General › Login Items was captured with
+`screencapture`. The owner approved the first `register()` and every login item created during the
+spike was removed afterwards.
+
+### Spike (decision gate)
+
+| Step                                    | Result                                                                                                                                                                                                                                                                           |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1. Enable from the menu                 | Pass: `register()` 69 ms, `status()` Disabled (`SMAppService` 3, NotFound, before the first registration) → Enabled (1); menu shows ✓; no LaunchAgent plist is written                                                                                                           |
+| 2. System Settings lists the app        | Pass: "Open at Login" lists "Pulsebar.app"                                                                                                                                                                                                                                       |
+| 3. Logout / login starts Pulsebar       | **chưa kiểm chứng** — pending: the owner will log out and back in and report the result                                                                                                                                                                                          |
+| 4. Disable                              | Pass: `unregister()` 28 ms, status NotRegistered (0) → Disabled; the entry disappears                                                                                                                                                                                            |
+| 5. Rebuild (new cdhash) and read status | Registered with build `d64e20a6…`, rebuilt to `b81ff1cc…`: the new build reads NotFound → Disabled while Login Items still lists the old entry; enabling again adds a second "Pulsebar.app"; disabling removes only the new one. The leftover entry was removed by hand with "−" |
+
+Gate: steps 1, 2 and 4 pass, step 3 pending the owner's report → path 3A (SMAppService, `tauri-plugin-autostart` removed).
+
+`register()` / `unregister()` latency on the main thread over the session: register 69, 110, 66, 36, 4 and 80 ms; unregister 28, 6, 4, 4 and 7 ms (the last pair on the final build). One register call was above the 100 ms threshold of the
+plan; the owner chose to keep the calls synchronous (they only run when the setting is toggled).
+
+Ad-hoc signing ties the registration to the code hash, so every rebuild or update of an ad-hoc build
+leaves the old entry behind and the new build reports "off". Documented for users in the README (D3):
+after updating, remove the old "Pulsebar.app" in Login Items and turn the option on again. A
+Developer ID signature should keep the identity across updates (**chưa kiểm chứng**).
+
+### Automated checks
+
+| AC   | Check                                                                                                                                                                                                                                                                                        | Result                                                                                                                                                                             |
+| ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| AC19 | `launch_location_issue` (read-only mount, AppTranslocation, `target/debug/pulsebar` → reason; `/Applications/…` and a read-write `/Volumes/Data/…` bundle → none); full `login_action` matrix; status mapping (NotRegistered / NotFound → Disabled); `launch_state` (blocked only while off) | Pass (`login_item.rs` 7 tests)                                                                                                                                                     |
+| AC19 | `launchAtLoginStatus` / `launchAtLoginReason` are output-only: forged client values are ignored; contract fixture on both sides (`settings`, `defaultSettings`, `launchAtLoginBlocked`, `launchAtLoginRequiresApproval`)                                                                     | Pass (`settings.rs`, `contract-settings.test.ts`)                                                                                                                                  |
+| AC19 | `open_login_items_settings` is in `APP_COMMANDS` and the capability                                                                                                                                                                                                                          | Pass (`ipc::tests::capability_allows_exactly_the_app_commands` checks that the capability allows exactly the `APP_COMMANDS` of `build.rs`; `generate_handler!` checked by reading) |
+| UI   | status → switch / hint / button rules for all 4 statuses; store action failure; mock `?login=` scenarios and status recomputation                                                                                                                                                            | Pass (Vitest 123 tests)                                                                                                                                                            |
+
+### Frontend (mock, Chromium)
+
+| Check                     | Result                                                                                                                                                                                                              |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `?login=requiresApproval` | switch on, hint "Cần cho phép Pulsebar trong Cài đặt hệ thống › Mục đăng nhập" linked by `aria-describedby`, button "Mở Cài đặt hệ thống" right after the switch in Tab order; Enter on the button raises no notice |
+| `?login=blocked`          | switch natively disabled with the Rust reason as its hint                                                                                                                                                           |
+| Contrast                  | light and dark, nominal and worst material: text ≥ 5.20:1 in the "Hệ thống" card                                                                                                                                    |
+
+### Real app (release x86_64, AC20 / AC21)
+
+| Check                                  | Result                                                                                                                                                                           |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Toggle in the popover                  | Pass: on → `Register` → Enabled; off → `Unregister` → Disabled                                                                                                                   |
+| Toggle in the menu, menu check in sync | Pass: menu ✓ after enabling from the popover; disabling from the menu updates the switch                                                                                         |
+| Theme change while Enabled             | Pass: two `set_settings` calls log `launch-at-login requested true: Noop`, no `register()`                                                                                       |
+| Run from a read-only DMG mount         | Pass: status `blocked`; the menu item is disabled; the switch is disabled with "Hãy chép Pulsebar vào thư mục Applications rồi bật lại"; clicking it sends nothing               |
+| Signature                              | Pass: `codesign -dv` → `Signature=adhoc`, `flags=0x10002(adhoc,runtime)`; `codesign --verify --deep --strict` valid                                                              |
+| Hardened runtime smoke test            | Pass: IOReport power, frequency and `smc:TC0D` temperature are `ok`, the popover renders; main CPU with the popover closed 0.18 % (3 min); main footprint 31 MB; no WARN / ERROR |
+| No leftovers                           | Pass: no Pulsebar login item, no `~/Library/LaunchAgents/Pulsebar.plist`; the owner's `settings.json` unchanged (`cmp`)                                                          |
+
+### Not verified in D5 (chưa kiểm chứng)
+
+- Starting at login after logout / login (step 3 of the spike): pending the owner's report.
+- `requiresApproval` on a real system (macOS reported Enabled right away here; covered by unit tests
+  and the mock only).
+- App Translocation at runtime (unit-tested path rule only), Apple Silicon, macOS 15 / 26 / 27,
+  Developer ID signed builds.
+- Focus when the "Mở Cài đặt hệ thống" button disappears while focused (the popover hides when System
+  Settings opens, so focus resets on the next open).

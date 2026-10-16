@@ -12,6 +12,7 @@
     "allow-set-settings",
     "allow-hide-popover",
     "allow-resize-popover",
-    "allow-quit-app"
+    "allow-quit-app",
+    "allow-open-login-items-settings"
   ]
 }
