@@ -286,3 +286,79 @@ Developer ID signature should keep the identity across updates (**chưa kiểm c
   Developer ID signed builds.
 - Focus when the "Mở Cài đặt hệ thống" button disappears while focused (the popover hides when System
   Settings opens, so focus resets on the next open).
+
+## D3 — release builds and docs (`chore/release-docs`)
+
+Date: 2026-10-17. No Rust or Svelte change: D3 adds the `build:arm64`, `build:x64` and
+`build:universal` scripts to `package.json`, the README and this section. Built on the dev host
+(macOS 14.8.9, Xcode 16.2 / SDK 15.2, Rust 1.99.0, tauri-cli 2.12.2, Node.js 24.16.0, pnpm 12.11.2)
+from a clean `src-tauri/target`, in the order universal (775 s), arm64 (311 s), x64 (291 s). Each
+build logs `skipping app notarization` because no `APPLE_*` notarization variables were set.
+
+### Bundles (AC10)
+
+| Check                                                      | arm64 (`aarch64-apple-darwin`)                                                        | x86_64 (`x86_64-apple-darwin`)                                                 | universal (`universal-apple-darwin`)                                                   |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------- |
+| `lipo -archs …/Contents/MacOS/pulsebar`                    | `arm64`                                                                               | `x86_64`                                                                       | `x86_64 arm64`                                                                         |
+| `codesign --verify --deep --strict --verbose=2`            | valid on disk, satisfies its Designated Requirement                                   | valid on disk, satisfies its Designated Requirement                            | valid on disk, satisfies its Designated Requirement (each `--arch` too)                |
+| `codesign -dv`                                             | `Signature=adhoc`, `flags=0x10002(adhoc,runtime)`                                     | `Signature=adhoc`, `flags=0x10002(adhoc,runtime)`                              | same for both slices; `Format=app bundle with Mach-O universal`                        |
+| `Info.plist`                                               | `LSMinimumSystemVersion` 14.0, `LSUIElement` true                                     | same                                                                           | same                                                                                   |
+| `.app` size                                                | 4.9 MB                                                                                | 5.0 MB                                                                         | 9.7 MB                                                                                 |
+| DMG                                                        | `Pulsebar_0.1.0_aarch64.dmg`, 2,318,965 bytes, UDZO                                   | `Pulsebar_0.1.0_x64.dmg`, 2,446,112 bytes, UDZO                                | `Pulsebar_0.1.0_universal.dmg`, 4,522,226 bytes, UDZO                                  |
+| `hdiutil attach -nobrowse -readonly -mountpoint <scratch>` | `Pulsebar.app` (arm64, signature valid) and `Applications -> /Applications`; detached | `Pulsebar.app` (x86_64, signature valid) and the `Applications` link; detached | `Pulsebar.app` (`x86_64 arm64`, signature valid) and the `Applications` link; detached |
+| DMG signature (`codesign -dv <dmg>`)                       | not signed (`code object is not signed at all`)                                       | not signed                                                                     | not signed                                                                             |
+| `spctl -a -vv -t exec <app>`                               | `rejected` (expected without Developer ID and notarization)                           | `rejected`                                                                     | `rejected`                                                                             |
+
+With the ad-hoc identity Tauri signs the app but not the DMG. Developer ID signing, notarization
+and stapling are documented in the README and are **chưa kiểm chứng** (no Developer ID available).
+
+SHA-256 of the DMGs built in this run (local builds only, not published):
+
+| DMG                            | SHA-256                                                            |
+| ------------------------------ | ------------------------------------------------------------------ |
+| `Pulsebar_0.1.0_aarch64.dmg`   | `178e0f814a7fc33987102b34b7a360761d643f9e6d8186b50ef23b9519a324ba` |
+| `Pulsebar_0.1.0_x64.dmg`       | `5ada3d7fc8f149ed9b0c07e1c139874542fa4352e3bfb8f855b83de37973d747` |
+| `Pulsebar_0.1.0_universal.dmg` | `205f25ff84f7fff37fa5deed45e3a07e6bea1a7d125b88ef51fbb3a2d60ec90e` |
+
+These checksums identify the DMGs of this run; a rebuild was not compared with them.
+
+### Smoke test of the universal build (x86_64 slice)
+
+Run from `src-tauri/target/universal-apple-darwin/release/bundle/macos/Pulsebar.app` with
+`RUST_LOG=pulsebar=debug`, the owner's settings (compact title with temperature, reduced effects;
+backed up before and compared with `cmp` after). On-screen checks used the V0 helpers
+(`CGWindowList`, CGEvent clicks and Esc, `screencapture`; permissions only read).
+
+| Check                    | Result                                                                                                                                                                                                                                      |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Slice that runs on Intel | Pass: `vmmap` `Code Type: X86-64`; `lsappinfo` `Arch=x86_64`, `type="UIElement"` (no Dock icon)                                                                                                                                             |
+| Back-ends at start-up    | Pass: `IOReport pmtelemetry_cpu/msr subscribed to 19 of 19 channels`, `SMC temperature key TC0D selected (80.0 °C)`, login item status Disabled; no WARN / ERROR                                                                            |
+| Menu bar title           | Pass: compact title with temperature `57%  33W 70% 85°` (the second space is U+2007), status item width 165 pt (same as D4)                                                                                                                 |
+| Popover overview         | Pass: renders under the icon (360 × 640); CPU 57 % with "Trung bình 3.226 MHz · IOReport" (3226 MHz; the UI uses the Vietnamese number format), power 34 W "Phạm vi: Gói CPU · IOReport", temperature 85 °C "Cao · SMC · TC0D", memory 70 % |
+| CPU detail view          | Pass: height 418; "4 lõi vật lý / 8 luồng", IOReport average / min / max 2644 / 2598 / 2690 MHz, speed limit 100 %, usage and MHz for each of the 8 logical CPUs (2598–2690 MHz)                                                            |
+| Esc and back button      | Pass: back returns to the overview, Esc hides the popover (`popover hidden`)                                                                                                                                                                |
+
+### Performance of the universal build (x86_64 slice)
+
+Measured with `top -l N -s 10 -pid … -stats pid,command,cpu,mem` (MEM = physical footprint), `footprint`
+and `ps -o rss=`, main process plus the app's three WebKit processes (pids from `lsappinfo list`). The
+host was busy (Chrome and a lint run of another project).
+
+| Budget                                     | Measured                                                                                                                                              | Status |
+| ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| CPU (main process), popover closed ≤ 0.8 % | 0.13 % mean over 5 min (30 samples, max 0.3 %); WebKit 0.00 %. One show / hide of the popover not triggered by the test was logged during this window | Pass   |
+| CPU (main process), popover open ≤ 3 %     | 0.68 % mean over 3 min (18 samples, max 0.9 %), visible the whole time (95 of 95 checks every 2 s); main + WebKit 1.89 %                              | Pass   |
+| Main footprint ≤ 35 MB                     | 26 MB closed, 27 MB open (RSS 37–45 MB closed, 34 MB open)                                                                                            | Pass   |
+| Total footprint ≤ 120 MB                   | 67–73 MB closed (Web Content 22–25 MB, GPU 13–22 MB, Networking 3 MB); 85 MB open (Web Content 32 MB, GPU 23 MB)                                      | Pass   |
+
+The one-hour growth check was not repeated for D3 (D4 measured +0 MB over 1 h; since then D5 only changed launch at login and signing).
+
+### Not verified in D3 (chưa kiểm chứng)
+
+- Running the arm64 bundle and the arm64 slice of the universal bundle (no Apple Silicon machine);
+  Apple Silicon budgets.
+- Developer ID signing, notarization and stapling of the app and the DMGs; Gatekeeper on a downloaded
+  (quarantined) build, including "Open Anyway" on macOS 15+ and Control-click › Open on macOS 14.
+- Copying the app from the DMG to `/Applications` and launch at login from there; the logout / login
+  start of D5 is still pending the owner's report.
+- macOS 15 / 26 / 27, real Intel Macs.

@@ -30,10 +30,10 @@ Popover, disks card, Wi-Fi card and performance budgets are covered in the D2 ta
 
 ## Continuous integration
 
-| Runner                          | Architecture | Result                                                                                                                                                             |
-| ------------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| GitHub Actions `macos-26`       | arm64 (VM)   | verified: runs 38560322065 (D1 `3cb01a7`), 38667843038 (D2 `ed7b7d0`) and 38723813727 (D4 `bda649a`) — fmt, clippy both targets, native Rust tests, frontend gates |
-| GitHub Actions `macos-26-intel` | x86_64 (VM)  | verified: same runs                                                                                                                                                |
+| Runner                          | Architecture | Result                                                                                                                                                                                         |
+| ------------------------------- | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GitHub Actions `macos-26`       | arm64 (VM)   | verified: runs 38560322065 (D1 `3cb01a7`), 38667843038 (D2 `ed7b7d0`), 38723813727 (D4 `bda649a`) and 38891681853 (D5 `c727fb0`) — fmt, clippy both targets, native Rust tests, frontend gates |
+| GitHub Actions `macos-26-intel` | x86_64 (VM)  | verified: same runs                                                                                                                                                                            |
 
 CI runners are virtual machines, so they prove the build and unit tests only; Apple Silicon runtime
 behaviour (macmon power, topology, budgets) stays **chưa kiểm chứng**.
@@ -66,3 +66,13 @@ behaviour (macmon power, topology, budgets) stays **chưa kiểm chứng**.
 | Intel Hackintosh i7-7700HQ (VirtualSMC) | 14.8.9            | verified: register / unregister, Login Items listing, DMG → blocked, ad-hoc + hardened runtime; start at login pending the owner's report (chưa kiểm chứng) |
 | Intel Mac (real hardware)               | 14 / 15 / 26      | chưa kiểm chứng                                                                                                                                             |
 | Apple Silicon M1–M5                     | 14 / 15 / 26 / 27 | chưa kiểm chứng                                                                                                                                             |
+
+## Verification status (D3)
+
+| Platform                                | macOS             | arm64 bundle                                                                                             | x86_64 bundle                                                                               | Universal bundle                                                                       | DMG install                                                                                                             |
+| --------------------------------------- | ----------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Intel Hackintosh i7-7700HQ (VirtualSMC) | 14.8.9            | built, `lipo`, ad-hoc signature and DMG contents verified; runtime chưa kiểm chứng (cannot run on Intel) | built and verified (`lipo`, signature, DMG contents)                                        | verified: x86_64 slice smoke test (power, frequency, temperature, popover) and budgets | DMG mounts with `Pulsebar.app` and the `Applications` link; copy to `/Applications` and Gatekeeper flow chưa kiểm chứng |
+| Intel Mac (real hardware)               | 14 / 15 / 26      | not applicable                                                                                           | chưa kiểm chứng                                                                             | chưa kiểm chứng                                                                        | chưa kiểm chứng                                                                                                         |
+| Apple Silicon M1–M5                     | 14 / 15 / 26 / 27 | chưa kiểm chứng                                                                                          | chưa kiểm chứng (runs under Rosetta, expected Unavailable power, frequency and temperature) | chưa kiểm chứng (arm64 slice)                                                          | chưa kiểm chứng                                                                                                         |
+
+Developer ID signing, notarization and stapling: chưa kiểm chứng on every platform (no Developer ID).
