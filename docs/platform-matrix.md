@@ -30,10 +30,10 @@ Popover, disks card, Wi-Fi card and performance budgets are covered in the D2 ta
 
 ## Continuous integration
 
-| Runner                          | Architecture | Result                                                                                                                                                                                         |
-| ------------------------------- | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| GitHub Actions `macos-26`       | arm64 (VM)   | verified: runs 38560322065 (D1 `3cb01a7`), 38667843038 (D2 `ed7b7d0`), 38723813727 (D4 `bda649a`) and 38891681853 (D5 `c727fb0`) — fmt, clippy both targets, native Rust tests, frontend gates |
-| GitHub Actions `macos-26-intel` | x86_64 (VM)  | verified: same runs                                                                                                                                                                            |
+| Runner                          | Architecture | Result                                                                                                                                                                                                                     |
+| ------------------------------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GitHub Actions `macos-26`       | arm64 (VM)   | verified: runs 38560322065 (D1 `3cb01a7`), 38667843038 (D2 `ed7b7d0`), 38723813727 (D4 `bda649a`), 38891681853 (D5 `c727fb0`) and 39003290743 (D3 `db73306`) — fmt, clippy both targets, native Rust tests, frontend gates |
+| GitHub Actions `macos-26-intel` | x86_64 (VM)  | verified: same runs                                                                                                                                                                                                        |
 
 CI runners are virtual machines, so they prove the build and unit tests only; Apple Silicon runtime
 behaviour (macmon power, topology, budgets) stays **chưa kiểm chứng**.
@@ -61,11 +61,11 @@ behaviour (macmon power, topology, budgets) stays **chưa kiểm chứng**.
 
 ## Verification status (D5)
 
-| Platform                                | macOS             | Launch at login (SMAppService)                                                                                                                              |
-| --------------------------------------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Intel Hackintosh i7-7700HQ (VirtualSMC) | 14.8.9            | verified: register / unregister, Login Items listing, DMG → blocked, ad-hoc + hardened runtime; start at login pending the owner's report (chưa kiểm chứng) |
-| Intel Mac (real hardware)               | 14 / 15 / 26      | chưa kiểm chứng                                                                                                                                             |
-| Apple Silicon M1–M5                     | 14 / 15 / 26 / 27 | chưa kiểm chứng                                                                                                                                             |
+| Platform                                | macOS             | Launch at login (SMAppService)                                                                                                                                                                                                  |
+| --------------------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Intel Hackintosh i7-7700HQ (VirtualSMC) | 14.8.9            | verified: register / unregister, Login Items listing, DMG → blocked, ad-hoc + hardened runtime; start at login: Pass (owner report, 2026-10-17; build and location not recorded); enabling from `/Applications` chưa kiểm chứng |
+| Intel Mac (real hardware)               | 14 / 15 / 26      | chưa kiểm chứng                                                                                                                                                                                                                 |
+| Apple Silicon M1–M5                     | 14 / 15 / 26 / 27 | chưa kiểm chứng                                                                                                                                                                                                                 |
 
 ## Verification status (D3)
 

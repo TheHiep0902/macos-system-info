@@ -1,0 +1,67 @@
+accepted = ["Apache-2.0", "MIT", "Zlib", "BSD-3-Clause", "BSD-2-Clause", "ISC", "Unicode-3.0", "MPL-2.0", "Unlicense", "0BSD", "CC0-1.0", "MIT-0"]
+targets = ["aarch64-apple-darwin", "x86_64-apple-darwin"]
+ignore-build-dependencies = true
+ignore-dev-dependencies = true
+private = { ignore = true }
+workarounds = ["chrono", "unicode-ident"]
+
+[alloc-stdlib.clarify]
+license = "BSD-3-Clause"
+
+[[alloc-stdlib.clarify.git]]
+path = "LICENSE"
+license = "BSD-3-Clause"
+checksum = "c0c56f26d9c051cac4d200c34c84e7ae9aaa853e01a982a1df08b09931e518ae"
+
+[block2.clarify]
+license = "MIT"
+
+[[block2.clarify.git]]
+path = "LICENSE.md"
+license = "MIT"
+checksum = "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+
+[brotli-decompressor.clarify]
+license = "BSD-3-Clause"
+
+[[brotli-decompressor.clarify.files]]
+path = "LICENSE"
+license = "BSD-3-Clause"
+checksum = "c0c56f26d9c051cac4d200c34c84e7ae9aaa853e01a982a1df08b09931e518ae"
+
+[dpi.clarify]
+license = "Apache-2.0 AND MIT"
+
+[[dpi.clarify.files]]
+path = "LICENSE"
+license = "Apache-2.0"
+checksum = "6dc0e068dcf3a5bc8e054205b85b7720e1d49265bbc64bf515d2cf79197df69a"
+
+[[dpi.clarify.files]]
+path = "LICENSE-LIBM-MIT"
+license = "MIT"
+checksum = "9eff396a99bafd208e7126602420d6864f6066c08b84485a5b032320a9c01997"
+
+[objc2.clarify]
+license = "MIT"
+
+[[objc2.clarify.git]]
+path = "LICENSE.md"
+license = "MIT"
+checksum = "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+
+[objc2-encode.clarify]
+license = "MIT"
+
+[[objc2-encode.clarify.git]]
+path = "LICENSE.md"
+license = "MIT"
+checksum = "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+
+[objc2-foundation.clarify]
+license = "MIT"
+
+[[objc2-foundation.clarify.git]]
+path = "LICENSE.md"
+license = "MIT"
+checksum = "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"

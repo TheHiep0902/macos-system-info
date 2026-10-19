@@ -1,0 +1,12 @@
+=== Rust crates ===
+{{#each licenses}}
+
+--------------------------------------------------------------------------------
+{{{name}}} ({{{id}}})
+
+{{#each used_by}}
+[crate] {{{crate.name}}} {{{crate.version}}} https://crates.io/crates/{{{crate.name}}}/{{{crate.version}}}
+{{/each}}
+
+{{{text}}}
+{{/each}}

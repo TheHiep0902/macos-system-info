@@ -30,6 +30,10 @@
       "icons/icon.icns",
       "icons/icon.png"
     ],
+    "resources": {
+      "../LICENSE": "LICENSE",
+      "../THIRD-PARTY-NOTICES.txt": "THIRD-PARTY-NOTICES.txt"
+    },
     "macOS": {
       "minimumSystemVersion": "14.0",
       "signingIdentity": "-",

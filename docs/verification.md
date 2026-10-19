@@ -234,11 +234,11 @@ spike was removed afterwards.
 | --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1. Enable from the menu                 | Pass: `register()` 69 ms, `status()` Disabled (`SMAppService` 3, NotFound, before the first registration) → Enabled (1); menu shows ✓; no LaunchAgent plist is written                                                                                                           |
 | 2. System Settings lists the app        | Pass: "Open at Login" lists "Pulsebar.app"                                                                                                                                                                                                                                       |
-| 3. Logout / login starts Pulsebar       | **chưa kiểm chứng** — pending: the owner will log out and back in and report the result                                                                                                                                                                                          |
+| 3. Logout / login starts Pulsebar       | Pass (owner report, 2026-10-17; build and location not recorded)                                                                                                                                                                                                                 |
 | 4. Disable                              | Pass: `unregister()` 28 ms, status NotRegistered (0) → Disabled; the entry disappears                                                                                                                                                                                            |
 | 5. Rebuild (new cdhash) and read status | Registered with build `d64e20a6…`, rebuilt to `b81ff1cc…`: the new build reads NotFound → Disabled while Login Items still lists the old entry; enabling again adds a second "Pulsebar.app"; disabling removes only the new one. The leftover entry was removed by hand with "−" |
 
-Gate: steps 1, 2 and 4 pass, step 3 pending the owner's report → path 3A (SMAppService, `tauri-plugin-autostart` removed).
+Gate: steps 1–4 pass (step 3 by owner report) → path 3A (SMAppService, `tauri-plugin-autostart` removed).
 
 `register()` / `unregister()` latency on the main thread over the session: register 69, 110, 66, 36, 4 and 80 ms; unregister 28, 6, 4, 4 and 7 ms (the last pair on the final build). One register call was above the 100 ms threshold of the
 plan; the owner chose to keep the calls synchronous (they only run when the setting is toggled).
@@ -279,7 +279,8 @@ Developer ID signature should keep the identity across updates (**chưa kiểm c
 
 ### Not verified in D5 (chưa kiểm chứng)
 
-- Starting at login after logout / login (step 3 of the spike): pending the owner's report.
+- Enabling launch at login from a copy in `/Applications` (step 3 of the spike itself passed by owner
+  report, 2026-10-17; build and location not recorded).
 - `requiresApproval` on a real system (macOS reported Enabled right away here; covered by unit tests
   and the mock only).
 - App Translocation at runtime (unit-tested path rule only), Apple Silicon, macOS 15 / 26 / 27,
@@ -360,5 +361,40 @@ The one-hour growth check was not repeated for D3 (D4 measured +0 MB over 1 h; s
 - Developer ID signing, notarization and stapling of the app and the DMGs; Gatekeeper on a downloaded
   (quarantined) build, including "Open Anyway" on macOS 15+ and Control-click › Open on macOS 14.
 - Copying the app from the DMG to `/Applications` and launch at login from there; the logout / login
-  start of D5 is still pending the owner's report.
+  start of D5 passed by owner report (2026-10-17; build and location not recorded).
 - macOS 15 / 26 / 27, real Intel Macs.
+
+## MIT licence and bundled third-party notices (`chore/license-notices`)
+
+Run on 2026-10-19 on the Intel Hackintosh (macOS 14.8.9), cargo-about 0.9.2, Rust 1.99.0, pnpm 12.11.2.
+
+### Notices file
+
+| Check                     | Result                                                                                                                                                                                                                                                                           |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `LICENSE`                 | Pass: standard MIT text, `Copyright (c) 2026 TheHiep0902`, matches `license = "MIT"` in `src-tauri/Cargo.toml`                                                                                                                                                                   |
+| `pnpm notices` twice      | Pass: exit 0 both times, byte-identical output (`cmp`), 401,449 bytes; `src-tauri/Cargo.lock` and `pnpm-lock.yaml` unchanged                                                                                                                                                     |
+| `pnpm notices:check`      | Pass: `rust 226 listed, linked 153 (x86_64 152, aarch64 153), lockfile closure 245 (x86_64 244, aarch64 245), npm 5`; no crate in the closure ships a `NOTICE` file                                                                                                              |
+| Negative check            | Pass: with the `[crate] serde_json` line removed from a copy, the check exits 1 and prints `missing crate: serde_json@1.0.154`; file restored and compared with `cmp`                                                                                                            |
+| JavaScript packages       | Pass: `@lucide/svelte`, `@tauri-apps/api` (Apache-2.0 text, not `LICENSE.spdx`), `clsx`, `svelte`, plus `vite` for the modulepreload polyfill found in the bundle (Vite core licence section only)                                                                               |
+| Placeholders and escaping | Pass: no `<year>`, `<copyright holders>`, `<owner>`, `[year]` or `[fullname]` outside the Apache-2.0 appendix; no HTML entities; the 5 MPL-2.0 crates link to crates.io with their version                                                                                       |
+| `clarify` entries         | Pass: 7 crates pinned by SHA-256: `alloc-stdlib` (upstream `LICENSE`), `brotli-decompressor` (BSD-3-Clause from its `LICENSE`), `dpi` (`LICENSE` + `LICENSE-LIBM-MIT`), and `objc2`, `block2`, `objc2-encode`, `objc2-foundation` (upstream `LICENSE.md` at each release commit) |
+| objc2 supplementary text  | Pass: `src-tauri/licenses/objc2-LICENSE-MIT.txt` equals upstream `LICENSE-MIT.txt` at `ee9a7ada2131f5944b8750428e265c15632f2a19` (SHA-256 `f6a2e783…b070`, also equal to upstream `main` on 2026-10-18), appended after the Rust section                                         |
+
+Crate sets: cargo-about lists the 153 crates linked into the binary (`cargo tree -e normal,no-proc-macro`, both targets) plus 73 proc-macro and build-host crates. The `cargo metadata` closure has 19 more crates (for example `chrono`, `schemars` 0.9.0 and 1.2.3) because metadata unifies the features enabled by build-dependencies; they are not compiled for the target, so the check only requires linked ⊆ listed ⊆ closure. cargo-about 0.9.2 no longer has the `no-clearly-defined` key, so `about.toml` does not set it.
+
+### Bundle (release x86_64, `pnpm build:x64`)
+
+| Check        | Result                                                                                                                                                            |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Resources    | Pass: `Contents/Resources/LICENSE` and `Contents/Resources/THIRD-PARTY-NOTICES.txt` present and equal to the repository files (`cmp`)                             |
+| Signature    | Pass: `codesign --verify --deep --strict`; `flags=0x10002(adhoc,runtime)`; sealed resources                                                                       |
+| DMG          | Pass: `Pulsebar_0.1.0_x64.dmg` mounted `-nobrowse -readonly`; the app inside has both files, equal to the repository files                                        |
+| Smoke test   | Pass: status item at layer 25; tray title changed from the start value to live values within 3.0 s (two runs: 2.7 s and 3.0 s); no `ERROR` in the log; clean exit |
+| No leftovers | Pass: no Pulsebar process, no LaunchAgent; the owner's `settings.json` unchanged (`cmp` with the existing backup)                                                 |
+
+### Not verified (chưa kiểm chứng)
+
+- Building and running the arm64 bundle (no Apple Silicon machine; `bundle.resources` is the same for every target).
+- The Homebrew install of cargo-about (no Homebrew on the dev host).
+- A legal review: the notices follow common practice, not legal advice.

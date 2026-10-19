@@ -87,3 +87,6 @@ jobs:
           host="$(rustc -vV | sed -n 's/^host: //p')"
           if [ "$host" = "aarch64-apple-darwin" ]; then other=x86_64-apple-darwin; else other=aarch64-apple-darwin; fi
           cargo test --locked --no-run --target "$other"
+
+      - name: Third-party notices up to date
+        run: pnpm notices:check
