@@ -85,3 +85,12 @@ Developer ID signing, notarization and stapling: chưa kiểm chứng on every p
 | Intel Hackintosh i7-7700HQ (VirtualSMC) | 14.8.9            | verified on `en1` (Wi-Fi); see docs/verification.md     | verified at 1x, Dark appearance; Light appearance chưa kiểm chứng | mock only       |
 | Intel Mac (real hardware)               | 14 / 15 / 26      | chưa kiểm chứng                                         | chưa kiểm chứng (Retina 2x)                                       | chưa kiểm chứng |
 | Apple Silicon M1–M5                     | 14 / 15 / 26 / 27 | chưa kiểm chứng (compiled, tests built with `--no-run`) | chưa kiểm chứng                                                   | chưa kiểm chứng |
+
+## Releases
+
+| Release | Type        | Assets                                  | Built on                                    |
+| ------- | ----------- | --------------------------------------- | ------------------------------------------- |
+| v0.1.0  | pre-release | `aarch64` and `x64` DMGs + `SHA256SUMS` | Intel Hackintosh (dev host), from `f5ccb49` |
+| v0.2.0  | release     | `aarch64` and `x64` DMGs + `SHA256SUMS` | Intel Hackintosh (dev host)                 |
+
+Results per release are in docs/verification.md ("GitHub releases").

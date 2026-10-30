@@ -22,8 +22,10 @@ macOS 14 or later, on Apple Silicon and Intel Macs, without sudo, kernel extensi
 The UI text is Vietnamese. Labels quoted in this README are the exact UI strings, followed by an
 English gloss.
 
-Status: version 0.1.0. Builds are signed ad-hoc and not notarized, and no GitHub Release is
-published yet, so build from source (see [Build](#build)). Detailed test results live in
+Status: version 0.2.0, the first release ([Download](#download)); v0.1.0 stays a pre-release.
+Builds are signed ad-hoc and not notarized (see
+[Installing and opening an un-notarized build](#installing-and-opening-an-un-notarized-build)), and
+the Apple Silicon build has not been run on a real Apple Silicon Mac yet. Detailed test results live in
 [docs/verification.md](docs/verification.md), the per-platform status in
 [docs/platform-matrix.md](docs/platform-matrix.md) and the UI contracts in
 [docs/ui-inventory.md](docs/ui-inventory.md).
@@ -31,6 +33,7 @@ published yet, so build from source (see [Build](#build)). Detailed test results
 ## Contents
 
 - [Support matrix](#support-matrix)
+- [Download](#download)
 - [Environment setup](#environment-setup)
 - [Development](#development)
 - [Build](#build)
@@ -78,7 +81,75 @@ Where it was verified:
 The SMC values on the dev host are emulated by VirtualSMC, so they only indicate how a real Intel
 Mac behaves.
 
+## Download
+
+Releases: <https://github.com/TheHiep0902/macos-system-info/releases>. The repository is private,
+so only accounts with access can download them.
+
+| Release | Type             | Contents                                                             |
+| ------- | ---------------- | -------------------------------------------------------------------- |
+| v0.2.0  | release (latest) | `Pulsebar_0.2.0_aarch64.dmg`, `Pulsebar_0.2.0_x64.dmg`, `SHA256SUMS` |
+| v0.1.0  | pre-release      | `Pulsebar_0.1.0_aarch64.dmg`, `Pulsebar_0.1.0_x64.dmg`, `SHA256SUMS` |
+
+1. Pick the DMG for your Mac: `aarch64` for Apple Silicon (M1 and later), `x64` for Intel.
+   `uname -m` prints `arm64` on Apple Silicon and `x86_64` on Intel.
+2. Check the download in the folder that holds the DMG and `SHA256SUMS`:
+
+```bash
+shasum -a 256 -c SHA256SUMS --ignore-missing
+```
+
+3. Install and open it as described in
+   [Installing and opening an un-notarized build](#installing-and-opening-an-un-notarized-build).
+
+Running a downloaded build needs nothing else: no Rust, Node.js or other runtime, no sudo and no
+kernel extension. It needs macOS 14 or later. Pulsebar asks for no privacy permission (no
+Accessibility, Screen Recording or Full Disk Access); "Khởi động cùng macOS" (Launch at login) may
+ask you to allow Pulsebar in System Settings › General › Login Items.
+
 ## Environment setup
+
+Everything below is only needed to build Pulsebar from source. Do the steps in order; each step
+gives the Homebrew and the MacPorts commands, so pick one package manager and use it throughout.
+The same commands work on Intel and Apple Silicon unless a step says otherwise.
+
+| Step                                               | What it installs                                           | Needed for            |
+| -------------------------------------------------- | ---------------------------------------------------------- | --------------------- |
+| [0](#0-check-the-mac)                              | nothing (checks)                                           | everything            |
+| [1](#1-xcode-command-line-tools)                   | Xcode Command Line Tools (clang, linker, macOS SDK, `git`) | building              |
+| [2](#2-a-package-manager)                          | Homebrew or MacPorts                                       | steps 3 and 6         |
+| [3](#3-rust-through-rustup)                        | rustup, Rust stable 1.99 or later                          | building              |
+| [4](#4-get-the-repository)                         | the source code                                            | everything below      |
+| [5](#5-rust-components-and-targets)                | `clippy`, `rustfmt`, the `aarch64` and `x86_64` targets    | building, local gates |
+| [6](#6-nodejs-24)                                  | Node.js 24 (22.12 or later works)                          | building, frontend    |
+| [7](#7-pnpm-through-corepack)                      | pnpm 12.11.2                                               | building, frontend    |
+| [8](#8-project-dependencies)                       | the npm packages of the repository                         | building, frontend    |
+| [9](#9-cargo-about-only-to-regenerate-the-notices) | cargo-about 0.9.2                                          | only `pnpm notices`   |
+| [10](#10-check-the-environment)                    | nothing (checks)                                           | everything            |
+| [11](#11-first-run-and-build)                      | nothing                                                    | —                     |
+
+Rust crates are downloaded by `cargo` on the first build; no system library (OpenSSL, libiconv and
+so on) is needed. The first build needs network access to crates.io and the npm registry.
+
+Where these steps were verified:
+
+| Mac                        | Homebrew     | MacPorts                                                                                                                                                                                          |
+| -------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Intel (dev host, macOS 14) | not verified | verified with the official rustup installer and fnm (no MacPorts package used); the `rustup`, `nodejs24`, `npm11` and `fnm` ports exist (MacPorts 2.12.6) but their install commands were not run |
+| Apple Silicon              | not verified | not verified                                                                                                                                                                                      |
+
+The Homebrew formula names and versions were read from formulae.brew.sh on 2026-10-30: `rustup`
+1.29.2 (keg-only), `node@24` 24.22.2 (keg-only), `fnm` 1.39.0, `cargo-about` 0.9.3.
+
+### 0. Check the Mac
+
+```bash
+sw_vers -productVersion
+uname -m
+```
+
+Expected: 14.0 or later; `arm64` on Apple Silicon, `x86_64` on Intel. On Apple Silicon, use a
+terminal that does not run under Rosetta: `uname -m` must print `arm64`.
 
 ### 1. Xcode Command Line Tools
 
@@ -87,21 +158,41 @@ xcode-select --install
 xcode-select -p
 ```
 
-### 2. Rust through rustup
+`xcode-select -p` prints `/Library/Developer/CommandLineTools` (or the full Xcode path if Xcode is
+installed). Accept the licence if a later step asks for it (`sudo xcodebuild -license accept`,
+full Xcode only).
 
-The toolchain is pinned by `rust-toolchain.toml` (channel `stable`, components `clippy` and
-`rustfmt`, targets `aarch64-apple-darwin` and `x86_64-apple-darwin`); `src-tauri/Cargo.toml`
-requires Rust 1.99 or later. Only a rustup-managed `cargo` reads `rust-toolchain.toml`, so install
-rustup with one of these options.
+### 2. A package manager
 
-Official installer:
+Homebrew (installer from <https://brew.sh>):
 
 ```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 ```
 
-Homebrew (the `rustup` formula, not the `rust` formula; it is keg-only and puts its `cargo` and
-`rustc` proxies in `$(brew --prefix rustup)/bin`, not in `~/.cargo/bin`):
+The prefix is `/opt/homebrew` on Apple Silicon and `/usr/local` on Intel. The installer prints the
+`brew shellenv` line to add to `~/.zprofile`; add it, then open a new terminal and check:
+
+```bash
+brew --prefix
+```
+
+MacPorts: install the package for your macOS version from <https://www.macports.org/install.php>
+(it uses `/opt/local` on both architectures), open a new terminal, then:
+
+```bash
+sudo port selfupdate
+port version
+```
+
+### 3. Rust through rustup
+
+Pulsebar needs a rustup-managed toolchain: only rustup reads `rust-toolchain.toml` (channel
+`stable`, components `clippy` and `rustfmt`, both macOS targets) and can cross-compile to the
+other architecture. Do not use the `rust` formula of Homebrew or the `rust` port of MacPorts.
+
+Homebrew (the `rustup` formula is keg-only, so its `cargo` and `rustc` proxies live in
+`$(brew --prefix rustup)/bin`, not in `~/.cargo/bin`):
 
 ```bash
 brew install rustup
@@ -113,39 +204,85 @@ Then add this line to `~/.zprofile`, after the `brew shellenv` line, and open a 
 export PATH="$(brew --prefix rustup)/bin:$PATH"
 ```
 
+```bash
+rustup default stable
+```
+
 MacPorts (the `rustup` port provides `rustup-init`):
 
 ```bash
 sudo port install rustup
-rustup-init --profile minimal
+rustup-init --profile minimal --default-toolchain stable
 ```
 
-Warning if Rust is already installed from Homebrew (`rust` formula) or MacPorts (`rust` port):
-`rustup-init` warns about the existing installation and asks before continuing (with `-y` it only
-warns and continues). Both can coexist,
-but the rustup proxies must come first in `PATH`. Otherwise the Homebrew or MacPorts `cargo`
-shadows rustup, ignores `rust-toolchain.toml` and has no cross-compilation targets. macOS
-`path_helper` (in `/etc/zprofile`), Homebrew and MacPorts prepend their directories after
-`~/.zshenv` has run, so put this line last in `~/.zprofile` (official installer and MacPorts
-variants):
+Official installer (works with either package manager, used on the dev host):
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --profile minimal --default-toolchain stable
+```
+
+With MacPorts or the official installer, put this line last in `~/.zprofile` and open a new
+terminal:
 
 ```bash
 export PATH="$HOME/.cargo/bin:$PATH"
 ```
 
-Install the toolchain, components and both targets:
+If Rust is already installed from Homebrew (`rust` formula) or MacPorts (`rust` port),
+`rustup-init` warns and asks before continuing. Both can stay installed, but the rustup proxies must
+come first in `PATH`; otherwise that `cargo` ignores `rust-toolchain.toml` and has no
+cross-compilation target. macOS `path_helper` (in `/etc/zprofile`), Homebrew and MacPorts prepend
+their directories after `~/.zshenv`, which is why the line goes last in `~/.zprofile`. Check:
 
 ```bash
-rustup default stable
-rustup update stable
+which -a cargo
+```
+
+The first line must be `~/.cargo/bin/cargo` (official installer, MacPorts) or
+`$(brew --prefix rustup)/bin/cargo` (Homebrew), not `/opt/homebrew/bin/cargo`, `/usr/local/bin/cargo`
+or `/opt/local/bin/cargo`.
+
+### 4. Get the repository
+
+`git` comes with the Command Line Tools (step 1). Over SSH (needs an SSH key with access to the
+private repository):
+
+```bash
+git clone git@github.com:TheHiep0902/macos-system-info.git
+cd macos-system-info
+```
+
+Or over HTTPS with the GitHub CLI signed in (`gh auth login`):
+
+```bash
+gh repo clone TheHiep0902/macos-system-info
+cd macos-system-info
+```
+
+Run every later step inside this folder.
+
+### 5. Rust components and targets
+
+Inside the repository, `rustup toolchain install` installs what `rust-toolchain.toml` lists
+(stable, `clippy`, `rustfmt`, `aarch64-apple-darwin`, `x86_64-apple-darwin`); `rustup show` then
+lists them:
+
+```bash
+rustup toolchain install
+rustup show
+```
+
+If a target is still missing, add both explicitly:
+
+```bash
 rustup component add clippy rustfmt
 rustup target add aarch64-apple-darwin x86_64-apple-darwin
 ```
 
-### 3. Node.js and pnpm
+### 6. Node.js 24
 
-`package.json` requires Node.js 22.12 or later and pins `pnpm@12.11.2` in `packageManager`; CI uses
-Node.js 24. Node.js 25 and later no longer ship Corepack, so Node.js 24 is the simplest choice.
+`package.json` requires Node.js 22.12 or later; CI uses Node.js 24. Node.js 25 and later no longer
+ship Corepack (step 7), so use 24.
 
 Homebrew (`node@24` is keg-only):
 
@@ -153,42 +290,87 @@ Homebrew (`node@24` is keg-only):
 brew install node@24
 ```
 
-Then add this line to `~/.zprofile`:
+Then add this line to `~/.zprofile` and open a new terminal:
 
 ```bash
 export PATH="$(brew --prefix node@24)/bin:$PATH"
 ```
 
-MacPorts:
+MacPorts (`nodejs24` installs `node`; `npm11` installs `npm`, needed for Corepack in step 7):
 
 ```bash
 sudo port install nodejs24 npm11
 ```
 
-fnm:
+fnm, a version manager (the dev host uses fnm installed with its own installer from
+<https://github.com/Schniz/fnm>; `brew install fnm` and `sudo port install fnm` are not verified):
 
 ```bash
-brew install fnm
 fnm install 24
 fnm default 24
 ```
 
-For fnm, also add `eval "$(fnm env --use-on-cd --shell zsh)"` to `~/.zshrc`.
+For fnm, also add this line to `~/.zshrc` and open a new terminal:
 
-pnpm through Corepack (it downloads the pinned version on first use inside the repository):
+```bash
+eval "$(fnm env --use-on-cd --shell zsh)"
+```
+
+### 7. pnpm through Corepack
+
+`package.json` pins `pnpm@12.11.2` in `packageManager`; Corepack downloads exactly that version the
+first time `pnpm` runs inside the repository:
 
 ```bash
 corepack enable pnpm
 ```
 
-If `corepack` is not found, install it first with `npm install -g corepack` (prefix `sudo` for the
-MacPorts Node.js, whose prefix is owned by root).
+If `corepack` is not found, install it with `npm install -g corepack` (prefix `sudo` for the
+MacPorts Node.js, whose prefix is owned by root), then run `corepack enable pnpm` again. With
+MacPorts, `corepack enable` also needs `sudo` because it writes the `pnpm` shim into
+`/opt/local/bin`. Do not install the Homebrew `pnpm` formula: it conflicts with Corepack and is not
+the pinned version.
 
-### 4. Check the environment
+### 8. Project dependencies
+
+```bash
+pnpm install --frozen-lockfile
+```
+
+Rust dependencies need no separate step: the first `cargo` or `pnpm tauri` command downloads them
+(`src-tauri/Cargo.lock` pins every version).
+
+### 9. cargo-about (only to regenerate the notices)
+
+cargo-about 0.9.2 is needed only to regenerate `THIRD-PARTY-NOTICES.txt` with `pnpm notices` (see
+[Third-party notices](#third-party-notices)). Building, testing and `pnpm notices:check` do not need
+it.
+
+cargo (works everywhere; needs steps 1 and 3 and network access to crates.io; about 3–8 minutes):
+
+```bash
+cd ~ && cargo install --locked --features cli cargo-about@0.9.2
+```
+
+The binary is `~/.cargo/bin/cargo-about`; the crate sources add about 112 MB to `~/.cargo/registry`.
+After a failed install, remove the leftovers with `rm -rf "$TMPDIR"/cargo-install*`. Uninstall with
+`cargo uninstall cargo-about`.
+
+Homebrew ships 0.9.3, not 0.9.2, so use the cargo command above for byte-identical notices.
+MacPorts has no `cargo-about` port. Check the install (expected `cargo-about 0.9.2`):
+
+```bash
+cargo about --version
+```
+
+### 10. Check the environment
 
 Run these inside the repository:
 
 ```bash
+sw_vers -productVersion
+uname -m
+xcode-select -p
 which -a cargo
 rustc -V
 rustup show active-toolchain
@@ -197,54 +379,39 @@ node -v
 pnpm -v
 ```
 
-Expected: the first `cargo` is a rustup proxy (`~/.cargo/bin/cargo`, or
-`$(brew --prefix rustup)/bin/cargo` with the Homebrew formula); `rustc` 1.99 or later; the active
-toolchain is `stable`, chosen by `rust-toolchain.toml`; both `aarch64-apple-darwin` and
-`x86_64-apple-darwin` are installed; Node.js 22.12 or later; pnpm 12.11.2.
+Expected:
 
-### 5. Install the frontend dependencies
+- macOS 14.0 or later, and the architecture of your Mac;
+- a Command Line Tools or Xcode path;
+- the first `cargo` is a rustup proxy (see step 3);
+- `rustc` 1.99 or later and the active toolchain `stable` (chosen by `rust-toolchain.toml`);
+- both `aarch64-apple-darwin` and `x86_64-apple-darwin` installed;
+- Node.js 22.12 or later (24 recommended);
+- pnpm 12.11.2.
 
-```bash
-pnpm install --frozen-lockfile
-```
-
-### 6. cargo-about (only to regenerate the notices)
-
-cargo-about 0.9.2 is needed only to regenerate `THIRD-PARTY-NOTICES.txt` with `pnpm notices` (see
-[Third-party notices](#third-party-notices)). Building, testing and `pnpm notices:check` do not need
-it.
-
-cargo (needs rustup from step 2, Xcode's clang from step 1 and network access to crates.io; it
-takes about 3–8 minutes):
+Optional, the frontend checks of CI (the Rust ones are in
+[Local gates](#local-gates-same-as-ci)):
 
 ```bash
-cd ~ && ~/.cargo/bin/cargo install --locked --features cli cargo-about@0.9.2
+pnpm format:check && pnpm lint && pnpm check && pnpm test
 ```
 
-The binary is `~/.cargo/bin/cargo-about`; the install is recorded in `~/.cargo/.crates.toml` and
-`~/.cargo/.crates2.json`, and the crate sources add about 112 MB to `~/.cargo/registry`. After a
-failed install, remove the leftovers with `rm -rf "$TMPDIR"/cargo-install*`. Uninstall with
-`cargo uninstall cargo-about`.
+### 11. First run and build
 
-Homebrew (not verified: the dev host has no Homebrew; the binary goes to `/opt/homebrew/bin` on
-Apple Silicon and `/usr/local/bin` on Intel):
+Debug run with hot reload of the popover (see [Development](#development)):
 
 ```bash
-brew install cargo-about
+pnpm tauri dev
 ```
 
-Check that `brew info cargo-about` reports 0.9.2; otherwise use the cargo command.
-
-MacPorts has no `cargo-about` port; use the cargo command.
-
-Check the install:
+Release bundle and DMG for your Mac (see [Build](#build); a first build takes about 5 minutes):
 
 ```bash
-which -a cargo-about
-cargo about --version
+pnpm build:arm64
 ```
 
-Expected: `cargo-about 0.9.2`.
+On an Intel Mac use `pnpm build:x64`. Both scripts work on either architecture, so one Mac can
+build both DMGs; only the native one can be run there.
 
 ## Development
 
@@ -341,7 +508,7 @@ Outputs, with `<triple>` one of `aarch64-apple-darwin`, `x86_64-apple-darwin`,
 | Artifact | Path                                                                                                     |
 | -------- | -------------------------------------------------------------------------------------------------------- |
 | App      | `src-tauri/target/<triple>/release/bundle/macos/Pulsebar.app`                                            |
-| DMG      | `src-tauri/target/<triple>/release/bundle/dmg/Pulsebar_0.1.0_aarch64.dmg` (`_x64.dmg`, `_universal.dmg`) |
+| DMG      | `src-tauri/target/<triple>/release/bundle/dmg/Pulsebar_0.2.0_aarch64.dmg` (`_x64.dmg`, `_universal.dmg`) |
 
 The two native DMGs (`aarch64`, `x64`) are the main release artifacts; the universal DMG is
 produced as well.
@@ -365,7 +532,7 @@ Inspect a DMG without opening a Finder window, then compute checksums for publis
 
 ```bash
 mkdir -p "$TMPDIR/pulsebar-dmg"
-hdiutil attach -nobrowse -readonly -mountpoint "$TMPDIR/pulsebar-dmg" src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/Pulsebar_0.1.0_aarch64.dmg
+hdiutil attach -nobrowse -readonly -mountpoint "$TMPDIR/pulsebar-dmg" src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/Pulsebar_0.2.0_aarch64.dmg
 /bin/ls -la "$TMPDIR/pulsebar-dmg"
 hdiutil detach "$TMPDIR/pulsebar-dmg"
 shasum -a 256 src-tauri/target/*/release/bundle/dmg/*.dmg
@@ -573,7 +740,7 @@ in the keychain (`notarytool` prompts for the app-specific password), then submi
 
 ```bash
 xcrun notarytool store-credentials pulsebar-notary --apple-id you@example.com --team-id TEAMID
-DMG=src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/Pulsebar_0.1.0_aarch64.dmg
+DMG=src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/Pulsebar_0.2.0_aarch64.dmg
 xcrun notarytool submit "$DMG" --keychain-profile pulsebar-notary --wait && xcrun stapler staple "$DMG"
 ```
 
@@ -587,7 +754,7 @@ Check the result:
 codesign --verify --deep --strict --verbose=2 src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Pulsebar.app
 codesign -dv src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Pulsebar.app
 spctl -a -vv -t exec src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Pulsebar.app
-spctl -a -vv -t open --context context:primary-signature src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/Pulsebar_0.1.0_aarch64.dmg
+spctl -a -vv -t open --context context:primary-signature src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/Pulsebar_0.2.0_aarch64.dmg
 ```
 
 `spctl` rejects an ad-hoc build (measured: `rejected` for the arm64, x86_64 and universal apps); that
@@ -595,9 +762,10 @@ is expected until the build is signed with Developer ID and notarized.
 
 ## Installing and opening an un-notarized build
 
-1. Pick the DMG for your Mac: `Pulsebar_0.1.0_aarch64.dmg` for Apple Silicon,
-   `Pulsebar_0.1.0_x64.dmg` for Intel, or `Pulsebar_0.1.0_universal.dmg` for either. Do not use the
-   x64 DMG on Apple Silicon (Rosetta disables power, frequency and temperature).
+1. Pick the DMG for your Mac: `Pulsebar_0.2.0_aarch64.dmg` for Apple Silicon, `Pulsebar_0.2.0_x64.dmg`
+   for Intel (releases ship only these two; `pnpm build:universal` builds a universal DMG from
+   source). Do not use the x64 DMG on Apple Silicon (Rosetta disables power, frequency and
+   temperature).
 2. Open the DMG and copy `Pulsebar.app` to `/Applications`. Run it from there, not from the DMG
    (launch at login only works from a writable location).
 3. Open it once despite the missing notarization. This applies to a downloaded build, which macOS
@@ -755,7 +923,7 @@ both files exist, so `THIRD-PARTY-NOTICES.txt` is committed: without it every `c
 
 | Command              | What it does                                           | Needs                                                                                                                                                                   |
 | -------------------- | ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pnpm notices`       | regenerates `THIRD-PARTY-NOTICES.txt`                  | cargo-about 0.9.2 ([step 6](#6-cargo-about-only-to-regenerate-the-notices)) and network access to crates.io and to the GitHub raw files of the pinned `clarify` entries |
+| `pnpm notices`       | regenerates `THIRD-PARTY-NOTICES.txt`                  | cargo-about 0.9.2 ([step 9](#9-cargo-about-only-to-regenerate-the-notices)) and network access to crates.io and to the GitHub raw files of the pinned `clarify` entries |
 | `pnpm notices:check` | checks the committed file; the last step of the CI job | no cargo-about                                                                                                                                                          |
 
 What the file lists:

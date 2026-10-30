@@ -462,3 +462,13 @@ time, and the switch is off by default.
 - Ethernet, USB tethering and several active `en*` interfaces at once (the dev host only has Wi-Fi
   `en1` active).
 - Virtual machines.
+
+## GitHub releases
+
+| Release | Date       | Type        | Commit    | Assets (bytes, SHA-256)                                                                                                                                                                                                            | Checks before upload                                                                                                                                                                                                              |
+| ------- | ---------- | ----------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| v0.1.0  | 2026-10-19 | pre-release | `f5ccb49` | `Pulsebar_0.1.0_aarch64.dmg` 2,351,940 B `081a62e90dfa8e31337c62704f038a350af8acd354b4f9f726307307698f542f`; `Pulsebar_0.1.0_x64.dmg` 2,467,280 B `6c75d664f0eee6ff3b7de8d0f90f7dd6d7ac49b9cf412de35180e5c0b37bb50d`; `SHA256SUMS` | `lipo` architecture, `codesign --verify --strict` (ad-hoc, hardened runtime), `LICENSE` and notices equal to the repository, `LSMinimumSystemVersion` 14.0, DMG contents, `hdiutil verify`; re-downloaded assets pass `shasum -c` |
+
+Both releases ship only the two native DMGs (no universal DMG). The downloaded, quarantined DMG
+(Gatekeeper flow, copy to `/Applications`, launch at login from `/Applications`) and the arm64 build
+on a real Apple Silicon Mac are chưa kiểm chứng.
