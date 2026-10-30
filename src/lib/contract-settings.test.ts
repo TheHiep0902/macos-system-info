@@ -17,7 +17,7 @@ const typed = {
   settings: {
     titleFormat: 'compact',
     showTrayIcon: false,
-    titleMetrics: { cpu: true, power: false, memory: true, temperature: true },
+    titleMetrics: { cpu: true, power: false, memory: true, temperature: true, network: true },
     theme: 'dark',
     reduceEffects: true,
     showNetworkDisks: true,
@@ -29,7 +29,7 @@ const typed = {
   defaultSettings: {
     titleFormat: 'default',
     showTrayIcon: true,
-    titleMetrics: { cpu: true, power: true, memory: true, temperature: false },
+    titleMetrics: { cpu: true, power: true, memory: true, temperature: false, network: false },
     theme: 'system',
     reduceEffects: false,
     showNetworkDisks: false,

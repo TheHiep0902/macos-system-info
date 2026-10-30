@@ -107,6 +107,12 @@ export interface NetworkSample {
   primaryInterface: string | null;
 }
 
+export interface ThroughputSample {
+  rxBytesPerSec: number;
+  txBytesPerSec: number;
+  interfaces: string[];
+}
+
 export interface Snapshot {
   seq: number;
   timestampMs: number;
@@ -116,6 +122,7 @@ export interface Snapshot {
   memory: MemorySample;
   disks: DiskSample[];
   network: NetworkSample;
+  throughput: MetricState<ThroughputSample>;
   uptimeSecs: number;
 }
 
@@ -128,6 +135,7 @@ export interface TitleMetrics {
   power: boolean;
   memory: boolean;
   temperature: boolean;
+  network: boolean;
 }
 
 export type LaunchAtLoginStatus = 'enabled' | 'disabled' | 'requiresApproval' | 'blocked';

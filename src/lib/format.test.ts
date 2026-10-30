@@ -8,6 +8,7 @@ import {
   formatInteger,
   formatMhz,
   formatPercent,
+  formatRate,
   formatUptime,
   formatWatts,
   powerScopeLabel,
@@ -56,6 +57,35 @@ describe('formatMhz', () => {
     expect(formatMhz(2400)).toBe(`2.400${NBSP}MHz`);
     expect(formatMhz(980)).toBe(`980${NBSP}MHz`);
     expect(formatMhz(null)).toBe(PLACEHOLDER);
+  });
+});
+
+describe('formatRate', () => {
+  it('shows megabytes per second with one decimal comma below 100 MB/s', () => {
+    expect(formatRate(0)).toBe(`0,0${NBSP}MB/s`);
+    expect(formatRate(40_000)).toBe(`0,0${NBSP}MB/s`);
+    expect(formatRate(9_950_000)).toBe(`10,0${NBSP}MB/s`);
+    expect(formatRate(12_400_000.5)).toBe(`12,4${NBSP}MB/s`);
+    expect(formatRate(310_000.25)).toBe(`0,3${NBSP}MB/s`);
+  });
+
+  it('shows whole megabytes from 100 MB/s upwards, including values that round up to 100', () => {
+    expect(formatRate(99_960_000)).toBe(`100${NBSP}MB/s`);
+    expect(formatRate(1_250_000_000)).toBe(`1.250${NBSP}MB/s`);
+  });
+
+  it('caps rates of 10 000 MB/s and above', () => {
+    expect(formatRate(9_999_400_000)).toBe(`9.999${NBSP}MB/s`);
+    expect(formatRate(9_999_960_000)).toBe(`9.999+${NBSP}MB/s`);
+    expect(formatRate(10_000_000_000)).toBe(`9.999+${NBSP}MB/s`);
+    expect(formatRate(12_345_000_000)).toBe(`9.999+${NBSP}MB/s`);
+  });
+
+  it('shows the placeholder for missing, non-finite or negative rates', () => {
+    expect(formatRate(Number.NaN)).toBe(PLACEHOLDER);
+    expect(formatRate(Number.POSITIVE_INFINITY)).toBe(PLACEHOLDER);
+    expect(formatRate(-1)).toBe(PLACEHOLDER);
+    expect(formatRate(null)).toBe(PLACEHOLDER);
   });
 });
 

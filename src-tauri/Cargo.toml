@@ -29,6 +29,8 @@ objc2 = "0.6.5"
 objc2-foundation = { version = "0.3.2", default-features = false, features = [
     "std",
     "NSArray",
+    "NSAttributedString",
+    "NSData",
     "NSDictionary",
     "NSError",
     "NSObject",
@@ -39,13 +41,22 @@ objc2-foundation = { version = "0.3.2", default-features = false, features = [
 objc2-app-kit = { version = "0.3.2", default-features = false, features = [
     "std",
     "objc2-core-foundation",
+    "NSAttributedString",
+    "NSBitmapImageRep",
     "NSButton",
+    "NSColor",
     "NSControl",
     "NSFont",
     "NSFontDescriptor",
+    "NSGraphics",
+    "NSGraphicsContext",
+    "NSImage",
+    "NSImageRep",
     "NSResponder",
+    "NSScreen",
     "NSStatusBarButton",
     "NSStatusItem",
+    "NSStringDrawing",
     "NSView",
 ] }
 objc2-core-foundation = { version = "0.3.2", default-features = false, features = [

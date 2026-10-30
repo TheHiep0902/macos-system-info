@@ -157,6 +157,14 @@ pub struct NetworkSample {
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ThroughputSample {
+    pub rx_bytes_per_sec: f64,
+    pub tx_bytes_per_sec: f64,
+    pub interfaces: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Snapshot {
     pub seq: u64,
     pub timestamp_ms: i64,
@@ -166,6 +174,7 @@ pub struct Snapshot {
     pub memory: MemorySample,
     pub disks: Vec<DiskSample>,
     pub network: NetworkSample,
+    pub throughput: MetricState<ThroughputSample>,
     pub uptime_secs: u64,
 }
 
@@ -298,6 +307,11 @@ mod tests {
                 is_wifi_connected: true,
                 primary_interface: Some("en0".into()),
             },
+            throughput: MetricState::Ok(ThroughputSample {
+                rx_bytes_per_sec: 12_400_000.5,
+                tx_bytes_per_sec: 310_000.25,
+                interfaces: vec!["en0".into()],
+            }),
             uptime_secs: 123_456,
         }
     }

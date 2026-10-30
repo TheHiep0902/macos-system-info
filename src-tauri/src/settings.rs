@@ -13,7 +13,8 @@ use crate::ipc::AppState;
 use crate::login_item::{self, LaunchAtLoginStatus, LaunchState, LoginAction};
 use crate::popover;
 use crate::sampler::SharedState;
-use crate::tray::{self, TRAY_ID, TitleMetrics};
+use crate::tray::{self, TitleMetrics};
+use crate::tray_image;
 
 pub const SETTINGS_FILE: &str = "settings.json";
 pub const MAX_SETTINGS_BYTES: u64 = 64 * 1024;
@@ -259,11 +260,8 @@ pub fn apply_shared(shared: &SharedState, settings: &Settings) {
 
 pub fn apply<R: Runtime>(app: &AppHandle<R>, previous: &Settings, next: &Settings) {
     apply_shared(&app.state::<AppState>().0, next);
-    if previous.show_tray_icon != next.show_tray_icon
-        && let Some(tray) = app.tray_by_id(TRAY_ID)
-        && let Err(err) = tray::set_icon_visible(&tray, next.show_tray_icon)
-    {
-        log::warn!("could not update tray icon visibility: {err}");
+    if previous.show_tray_icon != next.show_tray_icon {
+        tray_image::update(app, |state| state.show_icon = next.show_tray_icon);
     }
     if previous.theme != next.theme || previous.reduce_effects != next.reduce_effects {
         popover::apply_appearance(app, next);
@@ -348,6 +346,7 @@ mod tests {
                 power: false,
                 memory: true,
                 temperature: true,
+                network: true,
             },
             theme: ThemePreference::Dark,
             reduce_effects: true,
@@ -446,6 +445,7 @@ mod tests {
             power: false,
             memory: false,
             temperature: false,
+            network: false,
         }
     }
 
@@ -470,6 +470,7 @@ mod tests {
                 power: false,
                 memory: true,
                 temperature: true,
+                network: false,
             }
         );
         let parsed = parse_settings(r#"{"titleMetrics":{"cpu":"yes"}}"#);
@@ -499,6 +500,30 @@ mod tests {
         );
         assert!(parsed.settings.show_tray_icon);
         assert_eq!(parsed.settings.title_metrics, no_metrics());
+    }
+
+    #[test]
+    fn network_alone_keeps_the_tray_icon_hidden() {
+        let network_only = Settings {
+            show_tray_icon: false,
+            title_metrics: TitleMetrics {
+                network: true,
+                ..no_metrics()
+            },
+            ..Settings::default()
+        };
+        assert_eq!(network_only.clone().normalized(), network_only);
+        let parsed = parse_settings(
+            r#"{"showTrayIcon":false,"titleMetrics":{"cpu":false,"power":false,"memory":false,"network":true}}"#,
+        );
+        assert!(!parsed.repaired);
+        assert!(!parsed.settings.show_tray_icon);
+        assert!(parsed.settings.title_metrics.network);
+        let legacy = parse_settings(
+            r#"{"showTrayIcon":true,"titleMetrics":{"cpu":true,"power":true,"memory":true,"temperature":false}}"#,
+        );
+        assert!(!legacy.repaired);
+        assert!(!legacy.settings.title_metrics.network);
     }
 
     #[test]

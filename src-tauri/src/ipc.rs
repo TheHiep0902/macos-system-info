@@ -9,6 +9,7 @@ use crate::popover;
 use crate::sampler::{SharedState, Sink};
 use crate::settings::{self, SettingsPayload, SettingsStore};
 use crate::tray::{self, TRAY_ID};
+use crate::tray_image;
 
 pub const POPOVER_LABEL: &str = "popover";
 pub const EVENT_SNAPSHOT: &str = "metrics://snapshot";
@@ -127,6 +128,10 @@ impl<R: Runtime> Sink for TauriSink<R> {
             None => Err(format!("tray {TRAY_ID} not found")),
         };
         self.report(&self.title_failed, result, "tray title update");
+    }
+
+    fn set_rate_lines(&self, lines: Option<[String; 2]>) {
+        tray_image::update(&self.app, |state| state.lines = lines);
     }
 
     fn emit_snapshot(&self, snapshot: &Snapshot) {

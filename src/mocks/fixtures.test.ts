@@ -91,8 +91,9 @@ describe('mock fixtures', () => {
     expectSnapshotLiterals(snapshot);
   });
 
-  it('include a boot volume, a removable volume and a Wi-Fi connection', () => {
+  it('include a boot volume, a removable volume, a Wi-Fi connection and throughput', () => {
     for (const snapshot of [typedFixtures.appleSnapshot, typedFixtures.intelSnapshot]) {
+      expect(snapshot.throughput).toMatchObject({ state: 'ok', interfaces: ['en0'] });
       expect(snapshot.disks.some((disk) => disk.isBoot)).toBe(true);
       expect(snapshot.disks.some((disk) => disk.isRemovable)).toBe(true);
       expect(snapshot.network.isWifiConnected).toBe(true);
@@ -104,7 +105,7 @@ describe('parseScenario', () => {
   it('reads every supported query parameter', () => {
     const scenario = parseScenario(
       new URLSearchParams(
-        'platform=intel&theme=dark&view=cpu-detail&wifi=off&power=unavailable&temperature=unavailable&state=loading&rosetta=on&login=requiresApproval',
+        'platform=intel&theme=dark&view=cpu-detail&wifi=off&power=unavailable&temperature=unavailable&throughput=unavailable&state=loading&rosetta=on&login=requiresApproval',
       ),
     );
     expect(scenario).toEqual({
@@ -114,10 +115,15 @@ describe('parseScenario', () => {
       wifi: false,
       powerUnavailable: true,
       temperatureUnavailable: true,
+      throughput: 'unavailable',
       loading: true,
       rosetta: true,
       login: 'requiresApproval',
     });
+  });
+
+  it('reads the loading throughput scenario', () => {
+    expect(parseScenario(new URLSearchParams('throughput=loading')).throughput).toBe('loading');
   });
 
   it('reads the blocked launch-at-login scenario', () => {
@@ -127,7 +133,9 @@ describe('parseScenario', () => {
   it('falls back to defaults for unknown values', () => {
     expect(
       parseScenario(
-        new URLSearchParams('platform=arm&theme=blue&view=../x&temperature=off&login=enabled'),
+        new URLSearchParams(
+          'platform=arm&theme=blue&view=../x&temperature=off&throughput=on&login=enabled',
+        ),
       ),
     ).toEqual({
       platform: 'apple',
@@ -136,6 +144,7 @@ describe('parseScenario', () => {
       wifi: true,
       powerUnavailable: false,
       temperatureUnavailable: false,
+      throughput: 'ok',
       loading: false,
       rosetta: false,
       login: null,
@@ -287,6 +296,50 @@ describe('mock backend temperature', () => {
     expect(snapshots).toHaveLength(61);
     for (const snapshot of snapshots.slice(1)) {
       expect(snapshot.temperature).toEqual({ state: 'ok', celsius, source: 'smc:TCMb' });
+    }
+  });
+});
+
+describe('mock backend throughput', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  async function seededSnapshots(query: string): Promise<Snapshot[]> {
+    vi.useFakeTimers();
+    const { transport } = createMockTransport(new URLSearchParams(query));
+    const pushed: Snapshot[] = [];
+    const unlisten = await transport.listen<Snapshot>(EVENTS.snapshot, (snapshot) => {
+      pushed.push(snapshot);
+    });
+    const latest = await transport.invoke<Snapshot>(COMMANDS.getSnapshot);
+    unlisten();
+    return [...pushed, latest];
+  }
+
+  it.each([
+    [0, 840_000, 62_000],
+    [1, 15_960_000, 1_178_000],
+  ])('varies around the fixture rates (random %s)', async (random, rx, tx) => {
+    vi.spyOn(Math, 'random').mockReturnValue(random);
+    const snapshots = await seededSnapshots('platform=apple');
+    for (const snapshot of snapshots.slice(1)) {
+      expect(snapshot.throughput).toEqual({
+        state: 'ok',
+        rxBytesPerSec: rx,
+        txBytesPerSec: tx,
+        interfaces: ['en0'],
+      });
+    }
+  });
+
+  it.each([
+    ['throughput=unavailable', { state: 'unavailable', reason: 'Không đọc được lưu lượng mạng' }],
+    ['throughput=loading', { state: 'loading' }],
+  ])('keeps the %s state on every tick', async (query, expected) => {
+    for (const snapshot of await seededSnapshots(query)) {
+      expect(snapshot.throughput).toEqual(expected);
     }
   });
 });

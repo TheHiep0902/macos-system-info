@@ -145,7 +145,12 @@
     />
     <MemoryCard memory={store.snapshot?.memory ?? null} />
     <DiskCard disks={store.snapshot?.disks ?? null} changing={store.disksChanging} />
-    <NetworkCard network={store.snapshot?.network ?? null} />
+    <NetworkCard
+      network={store.snapshot?.network ?? null}
+      throughput={store.snapshot?.throughput ?? null}
+      rxHistory={store.history.rx}
+      txHistory={store.history.tx}
+    />
     <UptimeCard uptimeSecs={store.snapshot?.uptimeSecs ?? null} staticInfo={store.staticInfo} />
   </PopoverShell>
 {/if}

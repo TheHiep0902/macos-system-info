@@ -12,6 +12,7 @@ pub mod smc;
 pub mod sys;
 pub mod topology;
 pub mod tray;
+pub mod tray_image;
 
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver};
@@ -106,6 +107,7 @@ pub fn run() {
             let current = store.get();
             settings::apply_shared(&app.state::<AppState>().0, &current);
             app.manage(store);
+            app.manage(tray_image::TrayImage::new(current.show_tray_icon));
             let handle = app.handle();
             let (tray, menu) = tray::create(
                 handle,

@@ -7,7 +7,7 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, Tray
 use tauri::{AppHandle, Manager, Runtime};
 
 use crate::login_item::LaunchAtLoginStatus;
-use crate::model::{MetricState, PowerSample, TemperatureSample};
+use crate::model::{MetricState, PowerSample, TemperatureSample, ThroughputSample};
 use crate::popover::{self, Anchor, RequestedView};
 
 pub const TRAY_ID: &str = "main";
@@ -17,12 +17,14 @@ pub const MENU_LAUNCH_AT_LOGIN: &str = "launch-at-login";
 pub const MENU_SETTINGS: &str = "settings";
 pub const MENU_QUIT: &str = "quit";
 
-const TRAY_ICON: &[u8] = include_bytes!("../icons/tray-template@2x.png");
+pub(crate) const TRAY_ICON: &[u8] = include_bytes!("../icons/tray-template@2x.png");
 const FIGURE_SPACE: char = '\u{2007}';
 const UNKNOWN: &str = "–";
 const PCT_WIDTH: usize = 2;
 const WATTS_WIDTH: usize = 3;
 const TEMP_WIDTH: usize = 2;
+const BYTES_PER_MB: f64 = 1_000_000.0;
+const RATE_CAP_MB: f64 = 10_000.0;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum TitleFormat {
@@ -38,6 +40,7 @@ pub struct TitleMetrics {
     pub power: bool,
     pub memory: bool,
     pub temperature: bool,
+    pub network: bool,
 }
 
 impl Default for TitleMetrics {
@@ -47,13 +50,14 @@ impl Default for TitleMetrics {
             power: true,
             memory: true,
             temperature: false,
+            network: false,
         }
     }
 }
 
 impl TitleMetrics {
     pub fn is_empty(self) -> bool {
-        !(self.cpu || self.power || self.memory || self.temperature)
+        !(self.cpu || self.power || self.memory || self.temperature || self.network)
     }
 }
 
@@ -144,6 +148,33 @@ pub fn format_title(
         TitleFormat::Compact => " ",
     };
     parts.join(separator)
+}
+
+fn format_rate(bytes_per_sec: f64) -> String {
+    if !bytes_per_sec.is_finite() || bytes_per_sec < 0.0 {
+        return UNKNOWN.to_owned();
+    }
+    let tenths = (bytes_per_sec / BYTES_PER_MB * 10.0).round() / 10.0;
+    if tenths < 100.0 {
+        return format!("{tenths:.1}");
+    }
+    let whole = tenths.round();
+    if whole >= RATE_CAP_MB {
+        "9999+".to_owned()
+    } else {
+        format!("{whole:.0}")
+    }
+}
+
+pub fn format_rate_lines(sample: &MetricState<ThroughputSample>) -> [String; 2] {
+    let (up, down) = match sample {
+        MetricState::Ok(sample) => (
+            format_rate(sample.tx_bytes_per_sec),
+            format_rate(sample.rx_bytes_per_sec),
+        ),
+        _ => (UNKNOWN.to_owned(), UNKNOWN.to_owned()),
+    };
+    [format!("↑ {up}"), format!("↓ {down}")]
 }
 
 pub struct TrayMenu<R: Runtime> {
@@ -412,6 +443,7 @@ mod tests {
             power: false,
             memory: false,
             temperature: true,
+            network: false,
         };
         assert_eq!(
             with_temp(&temp(54.0), TitleFormat::Default, only_temp),
@@ -438,8 +470,18 @@ mod tests {
             power: false,
             memory: false,
             temperature: false,
+            network: false,
         };
         assert!(none.is_empty());
+        let only_network = TitleMetrics {
+            network: true,
+            ..none
+        };
+        assert!(!only_network.is_empty());
+        assert_eq!(
+            with_temp(&temp(54.0), TitleFormat::Default, only_network),
+            ""
+        );
         assert!(!TitleMetrics::default().is_empty());
         assert_eq!(with_temp(&temp(54.0), TitleFormat::Default, none), "");
         assert_eq!(with_temp(&temp(54.0), TitleFormat::Compact, none), "");
@@ -455,7 +497,65 @@ mod tests {
         assert_eq!(partial, all_metrics());
         assert_eq!(
             serde_json::to_value(TitleMetrics::default()).unwrap(),
-            serde_json::json!({"cpu": true, "power": true, "memory": true, "temperature": false})
+            serde_json::json!({
+                "cpu": true,
+                "power": true,
+                "memory": true,
+                "temperature": false,
+                "network": false
+            })
         );
+        let legacy: TitleMetrics =
+            serde_json::from_str(r#"{"cpu":true,"power":true,"memory":true,"temperature":false}"#)
+                .unwrap();
+        assert!(!legacy.network);
+    }
+
+    fn rate(rx: f64, tx: f64) -> MetricState<ThroughputSample> {
+        MetricState::Ok(ThroughputSample {
+            rx_bytes_per_sec: rx,
+            tx_bytes_per_sec: tx,
+            interfaces: vec!["en0".into()],
+        })
+    }
+
+    #[test]
+    fn rates_use_one_decimal_below_one_hundred_and_integers_above() {
+        assert_eq!(format_rate(0.0), "0.0");
+        assert_eq!(format_rate(40_000.0), "0.0");
+        assert_eq!(format_rate(9_950_000.0), "10.0");
+        assert_eq!(format_rate(12_400_000.5), "12.4");
+        assert_eq!(format_rate(99_960_000.0), "100");
+        assert_eq!(format_rate(1_250_000_000.0), "1250");
+        assert_eq!(format_rate(9_999_400_000.0), "9999");
+        assert_eq!(format_rate(9_999_940_000.0), "9999+");
+        assert_eq!(format_rate(12_345_000_000.0), "9999+");
+    }
+
+    #[test]
+    fn invalid_rates_show_dash() {
+        assert_eq!(format_rate(f64::NAN), "–");
+        assert_eq!(format_rate(f64::INFINITY), "–");
+        assert_eq!(format_rate(-1.0), "–");
+    }
+
+    #[test]
+    fn rate_lines_put_upload_first() {
+        assert_eq!(
+            format_rate_lines(&rate(12_400_000.0, 310_000.0)),
+            ["↑ 0.3".to_owned(), "↓ 12.4".to_owned()]
+        );
+        assert_eq!(
+            format_rate_lines(&rate(f64::NAN, 0.0)),
+            ["↑ 0.0".to_owned(), "↓ –".to_owned()]
+        );
+    }
+
+    #[test]
+    fn rate_lines_show_dash_without_data() {
+        let dashes = ["↑ –".to_owned(), "↓ –".to_owned()];
+        assert_eq!(format_rate_lines(&MetricState::Loading), dashes);
+        let unavailable = MetricState::Unavailable { reason: "x".into() };
+        assert_eq!(format_rate_lines(&unavailable), dashes);
     }
 }

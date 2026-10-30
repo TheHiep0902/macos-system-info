@@ -7,6 +7,7 @@ export const TITLE_METRIC_KEYS: readonly TitleMetricKey[] = [
   'power',
   'memory',
   'temperature',
+  'network',
 ];
 
 export interface MenuBarLocks {
@@ -26,6 +27,7 @@ export function menuBarLocks(
       power: lastMetric === 'power',
       memory: lastMetric === 'memory',
       temperature: lastMetric === 'temperature',
+      network: lastMetric === 'network',
     },
   };
 }

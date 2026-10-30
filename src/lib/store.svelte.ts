@@ -15,11 +15,22 @@ export interface History {
   readonly power: readonly number[];
   readonly temperature: readonly number[];
   readonly memory: readonly number[];
+  readonly rx: readonly number[];
+  readonly tx: readonly number[];
 }
 
 type CallResult<T> = { ok: true; value: T } | { ok: false };
 
-const EMPTY_HISTORY: History = { cpu: [], power: [], temperature: [], memory: [] };
+const EMPTY_HISTORY: History = {
+  cpu: [],
+  power: [],
+  temperature: [],
+  memory: [],
+  rx: [],
+  tx: [],
+};
+
+const BYTES_PER_MEGABYTE = 1_000_000;
 
 const DATA_COMMANDS: readonly CommandName[] = [COMMANDS.getSnapshot, COMMANDS.getStaticInfo];
 
@@ -252,6 +263,14 @@ export class PopoverStore {
       temperature:
         next.temperature.state === 'ok'
           ? appendBounded(base.temperature, next.temperature.celsius)
+          : [],
+      rx:
+        next.throughput.state === 'ok'
+          ? appendBounded(base.rx, next.throughput.rxBytesPerSec / BYTES_PER_MEGABYTE)
+          : [],
+      tx:
+        next.throughput.state === 'ok'
+          ? appendBounded(base.tx, next.throughput.txBytesPerSec / BYTES_PER_MEGABYTE)
           : [],
     };
     this.snapshot = next;

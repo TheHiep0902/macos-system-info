@@ -3,7 +3,7 @@
 
   interface Props {
     values: readonly number[];
-    tone: 'cpu' | 'power' | 'temperature' | 'memory';
+    tone: 'cpu' | 'power' | 'temperature' | 'memory' | 'network';
     capacity?: number;
     max?: number | null;
   }
@@ -61,5 +61,9 @@
 
   [data-tone='memory'] polyline {
     stroke: var(--color-chart-memory);
+  }
+
+  [data-tone='network'] polyline {
+    stroke: var(--color-chart-network);
   }
 </style>

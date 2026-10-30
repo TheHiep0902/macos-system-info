@@ -7,7 +7,13 @@ interface MenuBar {
   titleMetrics: TitleMetrics;
 }
 
-const NONE: TitleMetrics = { cpu: false, power: false, memory: false, temperature: false };
+const NONE: TitleMetrics = {
+  cpu: false,
+  power: false,
+  memory: false,
+  temperature: false,
+  network: false,
+};
 
 function only(key: TitleMetricKey): TitleMetrics {
   return { ...NONE, [key]: true };
@@ -34,11 +40,15 @@ describe('menuBarLocks', () => {
     expect(
       menuBarLocks({
         showTrayIcon: true,
-        titleMetrics: { cpu: true, power: true, memory: true, temperature: false },
+        titleMetrics: { cpu: true, power: true, memory: true, temperature: false, network: false },
       }),
-    ).toEqual({
+    ).toEqual({ icon: false, metrics: NONE });
+  });
+
+  it('locks network when only the rate lines are shown without the icon', () => {
+    expect(menuBarLocks({ showTrayIcon: false, titleMetrics: only('network') })).toEqual({
       icon: false,
-      metrics: { cpu: false, power: false, memory: false, temperature: false },
+      metrics: { ...NONE, network: true },
     });
   });
 

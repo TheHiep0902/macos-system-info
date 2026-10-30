@@ -57,6 +57,7 @@
     { key: 'power', label: t('settings.titleMetrics.power') },
     { key: 'memory', label: t('settings.titleMetrics.memory') },
     { key: 'temperature', label: t('settings.titleMetrics.temperature') },
+    { key: 'network', label: t('settings.titleMetrics.network') },
   ];
 
   function setTitleMetric(key: TitleMetricKey, shown: boolean): void {

@@ -328,6 +328,43 @@ describe('PopoverStore history', () => {
     expect(store.history.power).toEqual([]);
     expect(store.history.cpu).toHaveLength(2);
   });
+  it('appends throughput in MB/s while it is ok and clears it while it is not', async () => {
+    const transport = createTransport();
+    const store = new PopoverStore(transport);
+    await store.init();
+    expect(store.history.rx).toEqual([12.4000005]);
+    expect(store.history.tx).toEqual([0.31000025]);
+    transport.emit(EVENTS.snapshot, {
+      ...snapshotAt(11, 1_002_000),
+      throughput: { state: 'ok', rxBytesPerSec: 0, txBytesPerSec: 2_500_000, interfaces: [] },
+    });
+    expect(store.history.rx).toEqual([12.4000005, 0]);
+    expect(store.history.tx).toEqual([0.31000025, 2.5]);
+    transport.emit(EVENTS.snapshot, {
+      ...snapshotAt(12, 1_004_000),
+      throughput: { state: 'loading' },
+    });
+    expect(store.history.rx).toEqual([]);
+    expect(store.history.tx).toEqual([]);
+    transport.emit(EVENTS.snapshot, {
+      ...snapshotAt(13, 1_006_000),
+      throughput: { state: 'unavailable', reason: 'x' },
+    });
+    expect(store.history.rx).toEqual([]);
+    expect(store.history.cpu).toHaveLength(4);
+    transport.emit(EVENTS.snapshot, snapshotAt(14, 1_008_000));
+    expect(store.history.rx).toEqual([12.4000005]);
+  });
+
+  it('restarts the throughput history after a gap like the other series', async () => {
+    const transport = createTransport();
+    const store = new PopoverStore(transport);
+    await store.init();
+    transport.emit(EVENTS.snapshot, snapshotAt(11, 1_002_000));
+    expect(store.history.tx).toHaveLength(2);
+    transport.emit(EVENTS.snapshot, snapshotAt(13, 1_004_000));
+    expect(store.history.tx).toEqual([0.31000025]);
+  });
 });
 
 describe('PopoverStore commands', () => {

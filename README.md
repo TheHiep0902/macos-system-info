@@ -5,13 +5,16 @@ macOS 14 or later, on Apple Silicon and Intel Macs, without sudo, kernel extensi
 `powermetrics`, and it starts no child processes.
 
 - **Menu bar title**: CPU usage, CPU power, RAM usage and CPU temperature, each switchable in
-  "Thanh menu" (Menu bar), plus an optional icon (at least one metric or the icon stays on). The
+  "Thanh menu" (Menu bar), plus an optional icon (at least one metric or the icon stays on).
+  "Tốc độ mạng (↑/↓)" (Network speed, off by default) adds the upload and download rate in MB/s as
+  two stacked lines between the icon and the title (`↑ 0.3` over `↓ 12.4`, no unit, fixed width). The
   default is CPU, power and RAM with the icon. Two styles: default (`CPU 23% · 8.4W · RAM 61%`) and compact
   (`23% 8.4W 61%`). The digits use a monospaced font and short values are padded with a figure space
   (U+2007), so the width stays stable.
 - **Popover** (left click on the title): CPU usage with a 2-minute history and frequency, a CPU
   detail view (per cluster and per core usage and MHz), CPU power, CPU temperature, memory
-  breakdown, disks, Wi-Fi interface and IP addresses, uptime, boot time, macOS version and model,
+  breakdown, disks, network ("Mạng": download and upload rate in MB/s with a 2-minute history, Wi-Fi
+  interface and IP addresses), uptime, boot time, macOS version and model,
   and the settings.
 - **Right-click menu**: "Mở Pulsebar" (Open Pulsebar), "Khởi động cùng macOS" (Launch at login),
   "Cài đặt…" (Settings…), "Thoát" (Quit).
@@ -53,6 +56,7 @@ published yet, so build from source (see [Build](#build)). Detailed test results
 | CPU power (W)                         | yes (macmon)                                                    | yes (IOReport package energy, SMC fallback)                                                 | Unavailable ("Đang chạy qua Rosetta – hãy mở bản native") | Apple Silicon VM: Unavailable ("Máy ảo không cung cấp cảm biến công suất"); Intel VM: sensors probed, expected Unavailable (not verified)      |
 | CPU frequency (MHz)                   | per core and per cluster (macmon)                               | per logical CPU through IOReport; fallback nominal / max + speed limit without per-core MHz | Unavailable ("Đang chạy qua Rosetta – hãy mở bản native") | Apple Silicon VM: Unavailable ("Máy ảo không cung cấp cảm biến xung nhịp"); Intel VM: expected nominal MHz through the fallback (not verified) |
 | CPU temperature                       | SMC firmware key `TCMb` (die average), then `TCMz`, then macmon | first SMC key present among `TCXC`, `TCXc`, `TC0D`, `TC0E`, `TC0F`, `TC0P`                  | Unavailable ("Đang chạy qua Rosetta – hãy mở bản native") | Unavailable ("Máy ảo không cung cấp cảm biến nhiệt độ")                                                                                        |
+| Network throughput (MB/s)             | yes                                                             | yes                                                                                         | yes                                                       | counts the guest's own `en*` interfaces (not verified)                                                                                         |
 | RAM, disks, Wi-Fi IP, uptime          | yes                                                             | yes                                                                                         | yes                                                       | yes                                                                                                                                            |
 
 An unavailable metric shows "Không khả dụng" (Unavailable) with the reason in the popover, and `–` on
@@ -390,7 +394,9 @@ main thread (AppKit / Tauri event loop)          "sampler" thread (std::thread, 
   the running instance".
 - **Sampler**: one named `sampler` thread samples every 2 s. A supervisor catches a panic, logs it
   and restarts the loop with a backoff. A sleep/wake gap longer than 3 s skips the power, frequency and
-  temperature update of that tick and resets the energy counters (CPU and RAM are still published). Disks and Wi-Fi are rescanned on every tick while the popover is open
+  temperature update of that tick and resets the energy counters (CPU and RAM are still published).
+  Every tick also reads the network byte counters (one `sysctl`); a sleep/wake gap restarts the
+  rate from a new baseline. Disks and Wi-Fi are rescanned on every tick while the popover is open
   and every fifth tick (10 s) while it is closed; a mounted or unmounted volume emits
   `disks://changed`.
 - **Backends**: chosen at compile time by `cfg(target_arch)` (`aarch64` links macmon; `x86_64`
@@ -398,7 +404,11 @@ main thread (AppKit / Tauri event loop)          "sampler" thread (std::thread, 
   Rosetta, `kern.hv_vmm_present` for VMs). Each metric tries a chain of candidates and keeps the
   first that opens; when none works, the metric becomes Unavailable with a Vietnamese reason
   instead of failing.
-- **Tray**: an `NSStatusItem` with a monospaced-digit title and an optional template icon. Left
+- **Tray**: an `NSStatusItem` with a monospaced-digit title and an optional template icon. With
+  "Tốc độ mạng (↑/↓)" on, the icon slot holds one template image drawn on the main thread
+  (`src-tauri/src/tray_image.rs`: `NSBitmapImageRep` at the main screen's backing scale, 9.5 pt
+  monospaced digits, logo + two lines), redrawn only when the text changes; the icon setting and
+  the rate lines share one state, and the main thread always draws the latest one. Left
   click toggles the popover (a click within 200 ms after the popover lost focus is ignored);
   right click opens the menu.
 - **Popover**: a 360 px wide window, pre-created hidden at start-up so the first open is instant,
@@ -435,17 +445,18 @@ IPC surface (names in `src/lib/ipc.ts`, payload types in `src/lib/types.ts`):
 
 ## Data sources
 
-| Metric          | Apple Silicon                                                                                                                                      | Intel                                                                                                                                                                                                                                                  |
-| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| CPU usage       | `host_processor_info`                                                                                                                              | `host_processor_info`                                                                                                                                                                                                                                  |
-| Clusters        | `IODeviceTree:/cpus` and `hw.perflevelN` (E / P / S labels)                                                                                        | single "CPU" cluster                                                                                                                                                                                                                                   |
-| CPU power       | macmon 0.9.0 (IOReport energy)                                                                                                                     | IOReport `pmtelemetry_cpu/msr` package energy, then SMC `PCPT`, then `PCPC`, then `PC0C`                                                                                                                                                               |
-| CPU frequency   | macmon, residency-weighted MHz per core                                                                                                            | IOReport `MSR_IA32_ACNT` / `MSR_IA32_MCNT` per logical CPU (base MHz × ΔACNT / ΔMCNT); if IOReport is missing, nominal and max MHz (`hw.cpufrequency`, `hw.cpufrequency_max`) plus the speed limit from `IOPMCopyCPUPowerStatus`, without per-core MHz |
-| CPU temperature | SMC firmware key `TCMb` (die average), then `TCMz` (maximum), read through `macmon::sources::SMC`, valid 15–130 °C; fallback macmon `cpu_temp_avg` | first SMC key present among `TCXC`, `TCXc`, `TC0D`, `TC0E`, `TC0F`, `TC0P`, valid 10–115 °C                                                                                                                                                            |
-| RAM             | `host_statistics64` and `vm_page_size`                                                                                                             | same                                                                                                                                                                                                                                                   |
-| Disks           | `getfsstat`                                                                                                                                        | same                                                                                                                                                                                                                                                   |
-| Wi-Fi IP        | SystemConfiguration and `getifaddrs`                                                                                                               | same                                                                                                                                                                                                                                                   |
-| Uptime          | `kern.boottime`                                                                                                                                    | same                                                                                                                                                                                                                                                   |
+| Metric          | Apple Silicon                                                                                                                                                    | Intel                                                                                                                                                                                                                                                  |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| CPU usage       | `host_processor_info`                                                                                                                                            | `host_processor_info`                                                                                                                                                                                                                                  |
+| Clusters        | `IODeviceTree:/cpus` and `hw.perflevelN` (E / P / S labels)                                                                                                      | single "CPU" cluster                                                                                                                                                                                                                                   |
+| CPU power       | macmon 0.9.0 (IOReport energy)                                                                                                                                   | IOReport `pmtelemetry_cpu/msr` package energy, then SMC `PCPT`, then `PCPC`, then `PC0C`                                                                                                                                                               |
+| CPU frequency   | macmon, residency-weighted MHz per core                                                                                                                          | IOReport `MSR_IA32_ACNT` / `MSR_IA32_MCNT` per logical CPU (base MHz × ΔACNT / ΔMCNT); if IOReport is missing, nominal and max MHz (`hw.cpufrequency`, `hw.cpufrequency_max`) plus the speed limit from `IOPMCopyCPUPowerStatus`, without per-core MHz |
+| CPU temperature | SMC firmware key `TCMb` (die average), then `TCMz` (maximum), read through `macmon::sources::SMC`, valid 15–130 °C; fallback macmon `cpu_temp_avg`               | first SMC key present among `TCXC`, `TCXc`, `TC0D`, `TC0E`, `TC0F`, `TC0P`, valid 10–115 °C                                                                                                                                                            |
+| RAM             | `host_statistics64` and `vm_page_size`                                                                                                                           | same                                                                                                                                                                                                                                                   |
+| Disks           | `getfsstat`                                                                                                                                                      | same                                                                                                                                                                                                                                                   |
+| Network rate    | `sysctl` `NET_RT_IFLIST2` (64-bit `if_data64` byte counters) of the `en*` interfaces that are up and running, summed; rate = byte delta / time between two ticks | same                                                                                                                                                                                                                                                   |
+| Wi-Fi IP        | SystemConfiguration and `getifaddrs`                                                                                                                             | same                                                                                                                                                                                                                                                   |
+| Uptime          | `kern.boottime`                                                                                                                                                  | same                                                                                                                                                                                                                                                   |
 
 Fallback rules:
 
@@ -457,6 +468,12 @@ Fallback rules:
 - Apple Silicon: the macmon session survives two consecutive failures, is dropped on the third and
   is reopened later.
 - Rosetta and virtual machines never open the SMC or macmon for temperature.
+- Network rate: only `en0`, `en1`, … are counted (Wi-Fi, Ethernet, USB / Thunderbolt Ethernet,
+  iPhone tethering). Loopback, VPN tunnels (`utun*`, `ipsec*`), AirDrop (`awdl*`, `llw*`), bridges and
+  virtual machine interfaces are skipped, so traffic is never counted twice; Bluetooth PAN and
+  `pdp_ip*` modems are not counted. It reads local kernel counters and generates no traffic. The
+  first tick, a tick after sleep and a tick shorter than 0.5 s show no value; an interface whose
+  counter goes backwards is skipped for that tick. MB/s is decimal (bytes/s ÷ 1,000,000).
 
 ## Performance
 

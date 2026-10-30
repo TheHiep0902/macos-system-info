@@ -9,6 +9,7 @@ import type {
   Snapshot,
   StaticInfo,
   TemperatureSample,
+  ThroughputSample,
 } from '../lib/types';
 import appleSnapshotJson from './snapshot-apple-silicon.json';
 import appleStaticJson from './static-apple-silicon.json';
@@ -22,12 +23,15 @@ export interface MockScenario {
   wifi: boolean;
   powerUnavailable: boolean;
   temperatureUnavailable: boolean;
+  throughput: ThroughputScenario;
   loading: boolean;
   rosetta: boolean;
   login: LoginScenario | null;
 }
 
 export type LoginScenario = 'requiresApproval' | 'blocked';
+
+export type ThroughputScenario = 'ok' | 'unavailable' | 'loading';
 
 type LaunchAtLoginFields = Pick<
   Settings,
@@ -41,6 +45,10 @@ const TEMPERATURE_UNAVAILABLE_REASON = 'Model Mac này không cung cấp cảm b
 const TEMPERATURE_SPREAD = 3;
 const TEMPERATURE_MIN = 30;
 const TEMPERATURE_MAX = 100;
+const THROUGHPUT_UNAVAILABLE_REASON = 'Không đọc được lưu lượng mạng';
+const THROUGHPUT_SPREAD = 0.9;
+const THROUGHPUT_CEILING = 3;
+const THROUGHPUT_SCENARIOS: readonly ThroughputScenario[] = ['ok', 'unavailable', 'loading'];
 const ROSETTA_REASON = 'Đang chạy qua Rosetta – hãy mở bản native';
 const VIEWS: readonly PopoverView[] = ['overview', 'cpu-detail', 'settings'];
 const LOGIN_SCENARIOS: readonly LoginScenario[] = ['requiresApproval', 'blocked'];
@@ -49,7 +57,7 @@ const LOGIN_BLOCKED_REASON = 'Hãy chép Pulsebar vào thư mục Applications r
 const DEFAULT_SETTINGS: Settings = {
   titleFormat: 'default',
   showTrayIcon: true,
-  titleMetrics: { cpu: true, power: true, memory: true, temperature: false },
+  titleMetrics: { cpu: true, power: true, memory: true, temperature: false, network: false },
   theme: 'system',
   reduceEffects: false,
   showNetworkDisks: false,
@@ -71,6 +79,7 @@ export function parseScenario(params: URLSearchParams): MockScenario {
     wifi: params.get('wifi') !== 'off',
     powerUnavailable: params.get('power') === 'unavailable',
     temperatureUnavailable: params.get('temperature') === 'unavailable',
+    throughput: pick(params.get('throughput'), THROUGHPUT_SCENARIOS) ?? 'ok',
     loading: params.get('state') === 'loading',
     rosetta: params.get('rosetta') === 'on',
     login: pick(params.get('login'), LOGIN_SCENARIOS),
@@ -118,6 +127,7 @@ class MockBackend {
   #settings: Settings;
   #current: Snapshot;
   readonly #temperatureBase: number | null;
+  readonly #throughputBase: ThroughputSample | null;
   #detail = false;
   #seeded = false;
   #timer: ReturnType<typeof setTimeout> | null = null;
@@ -135,6 +145,7 @@ class MockBackend {
     const snapshot = (apple ? appleSnapshotJson : intelSnapshotJson) as Snapshot;
     this.#temperatureBase =
       snapshot.temperature.state === 'ok' ? snapshot.temperature.celsius : null;
+    this.#throughputBase = snapshot.throughput.state === 'ok' ? snapshot.throughput : null;
     this.#current = this.#decorate(snapshot);
   }
 
@@ -273,7 +284,20 @@ class MockBackend {
           isWifiConnected: false,
           primaryInterface: null,
         };
-    return { ...snapshot, power, temperature, network, cpu: { ...snapshot.cpu, frequency } };
+    const throughput: Snapshot['throughput'] =
+      this.#scenario.throughput === 'unavailable'
+        ? { state: 'unavailable', reason: THROUGHPUT_UNAVAILABLE_REASON }
+        : this.#scenario.throughput === 'loading'
+          ? { state: 'loading' }
+          : snapshot.throughput;
+    return {
+      ...snapshot,
+      power,
+      temperature,
+      network,
+      throughput,
+      cpu: { ...snapshot.cpu, frequency },
+    };
   }
 
   #next(previous: Snapshot, timestampMs: number): Snapshot {
@@ -317,6 +341,10 @@ class MockBackend {
       previous.temperature.state === 'ok'
         ? this.#nextTemperature(previous.temperature)
         : previous.temperature;
+    const throughput: Snapshot['throughput'] =
+      previous.throughput.state === 'ok'
+        ? this.#nextThroughput(previous.throughput)
+        : previous.throughput;
     const usedPct = jitter(previous.memory.usedPct, 0.6, 20, 98);
     const usedBytes = Math.round((previous.memory.totalBytes * usedPct) / 100);
     return {
@@ -332,6 +360,7 @@ class MockBackend {
       },
       power,
       temperature,
+      throughput,
       memory: {
         ...previous.memory,
         usedPct,
@@ -360,6 +389,18 @@ class MockBackend {
       ...temperature,
       state: 'ok',
       celsius: jitter(base, TEMPERATURE_SPREAD, TEMPERATURE_MIN, TEMPERATURE_MAX),
+    };
+  }
+
+  #nextThroughput(throughput: ThroughputSample): Snapshot['throughput'] {
+    const base = this.#throughputBase ?? throughput;
+    const vary = (value: number) =>
+      Math.round(jitter(value, value * THROUGHPUT_SPREAD, 0, value * THROUGHPUT_CEILING));
+    return {
+      ...throughput,
+      state: 'ok',
+      rxBytesPerSec: vary(base.rxBytesPerSec),
+      txBytesPerSec: vary(base.txBytesPerSec),
     };
   }
 

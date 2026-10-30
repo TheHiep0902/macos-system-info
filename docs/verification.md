@@ -398,3 +398,67 @@ Crate sets: cargo-about lists the 153 crates linked into the binary (`cargo tree
 - Building and running the arm64 bundle (no Apple Silicon machine; `bundle.resources` is the same for every target).
 - The Homebrew install of cargo-about (no Homebrew on the dev host).
 - A legal review: the notices follow common practice, not legal advice.
+
+## Network throughput (`feat/network-throughput`)
+
+Real-time upload and download rate in MB/s from the kernel byte counters (`sysctl` `NET_RT_IFLIST2`,
+`en*` interfaces), shown in the popover's "Mạng" card and, with "Tốc độ mạng (↑/↓)" on, as a
+two-line template image in the menu bar item. Checked on 2026-10-30 with a release x86_64 bundle
+(`pnpm tauri build --target x86_64-apple-darwin --bundles app`), one 1920×1080 display at 1x, Dark
+appearance, the owner's settings plus `titleMetrics.network = true` (restored afterwards and
+compared with `cmp`).
+
+### Automated checks
+
+| Check                                                           | Result                                                                                                                                            |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cargo test --locked --target x86_64-apple-darwin`              | Pass: 285 tests (parser from an odd buffer offset, truncated and zero-length records, name filter, meter deltas, sleep gap, rate lines, settings) |
+| `cargo test --locked --no-run --target aarch64-apple-darwin`    | Pass (compiled only)                                                                                                                              |
+| `cargo clippy … -D warnings`, both targets; `cargo fmt --check` | Pass                                                                                                                                              |
+| `pnpm format:check`, `lint`, `check`, `test`, `build`           | Pass: 180 tests (`formatRate`, store `rx` / `tx` history, title-metric locks, contract fixtures, mock scenarios)                                  |
+| `pnpm notices:check`                                            | Pass: only new `objc2-app-kit` / `objc2-foundation` features, no new crate                                                                        |
+
+### Frontend (mock, Chromium)
+
+| Check                                                                                    | Result                                                                                 |
+| ---------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| "Mạng" card: ok (Light, Dark), Wi-Fi off, `throughput=loading`, `throughput=unavailable` | Pass: rate grid with labels and sparklines; Wi-Fi block unchanged below; console empty |
+| Settings switch "Tốc độ mạng (↑/↓)"                                                      | Pass: `role="switch"`, toggled with Space (`aria-checked` false → true)                |
+
+### Real app (release x86_64)
+
+| Check          | Method                                                                                                                                                             | Result                                                                                                                                                                                                                                                                                                                                                                                   |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Two-line image | `screencapture` of the status item                                                                                                                                 | Pass: logo, then `↑` / `↓` on the left and the values right-aligned, then the unchanged title; both lines inside the 24 pt menu bar at 1x                                                                                                                                                                                                                                                |
+| Stable width   | CGWindowList width over several ticks and values (`0.0`, `1.0`, `0.9`)                                                                                             | Pass: item 208 pt with the icon, 189 pt without the icon, 165 pt with the switch off (same as before the feature)                                                                                                                                                                                                                                                                        |
+| Live toggles   | switch "Tốc độ mạng (↑/↓)" and "Hiện biểu tượng" in the popover                                                                                                    | Pass: off restores the previous item; on brings the image back within one tick; icon off keeps only the rate lines; no stale state                                                                                                                                                                                                                                                       |
+| Clicks         | CGEvent left / right click on the item                                                                                                                             | Pass: popover centred under the item (item centre 1146, popover centre 1146) and hidden on a second click; right click opens the menu                                                                                                                                                                                                                                                    |
+| Accuracy (N6)  | LAN-only load: 12 × `ping -s 8000 -i 0.1` to the Wi-Fi gateway for about 30 s (about 1 MB/s each way, no internet or cellular data), with `netstat -I en1 -b -w 2` | Pass within the display resolution: netstat 0.93–1.01 MB/s each way (mean 0.97); the menu bar and the card showed 0.9–1.0 MB/s. Deviation from the plan: the plan asked for background traffic only and a ≤ 5 % error; background traffic (≈ 0.002–0.1 MB/s) was too small to compare, and one decimal cannot resolve 5 % at 1 MB/s. The rate arithmetic itself is covered by unit tests |
+| Logs           | `RUST_LOG=pulsebar=debug`                                                                                                                                          | Pass: no `ERROR`, no tray image warning                                                                                                                                                                                                                                                                                                                                                  |
+
+### Performance (AC9 budgets)
+
+The first three rows were measured on a build before the drawing cache (`DrawingCache` in
+`tray_image.rs`: font, attributes, reference width and logo kept per main thread) was added; the
+last row is the final code (rebuilt, smoke-tested again: image, width, left click).
+
+| State                                          | Main CPU (mean, `top` 10 s samples) | Footprint                                                                        |
+| ---------------------------------------------- | ----------------------------------- | -------------------------------------------------------------------------------- |
+| Network on, popover closed, 15 min             | 0.52 % (90 samples; max 5.1 %)      | main 29 → 30 MB (`footprint`, start / end); WebKit 32 + 3 + 19 MB; total ≈ 84 MB |
+| Network off, popover closed, 3 min             | 0.12 %                              | —                                                                                |
+| Network on, popover open (overview), 2 min     | 1.18 % (Web Content 0.52 %)         | main 31 MB, Web Content 55 MB                                                    |
+| Final build, network on, popover closed, 5 min | 0.26 % (30 samples; max 0.4 %)      | main 28 MB                                                                       |
+
+All within the budgets (closed ≤ 0.8 %, open ≤ 3 %, main ≤ 35 MB, total ≤ 120 MB). With the
+drawing cache, the image costs about 0.15 % CPU on average while the switch is on (0.26 % vs
+0.12 % with it off); it is redrawn only when the text changes, tray-icon re-encodes it as PNG each
+time, and the switch is off by default.
+
+### Not verified (chưa kiểm chứng)
+
+- Light appearance on the real app (the image is a template image; only Dark was checked, to leave
+  the owner's appearance setting untouched).
+- Retina (2x) displays, real Intel Macs, Apple Silicon at runtime, macOS 15 and later.
+- Ethernet, USB tethering and several active `en*` interfaces at once (the dev host only has Wi-Fi
+  `en1` active).
+- Virtual machines.

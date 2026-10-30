@@ -193,5 +193,11 @@
     "isWifiConnected": true,
     "primaryInterface": "en0"
   },
+  "throughput": {
+    "state": "ok",
+    "rxBytesPerSec": 3100000,
+    "txBytesPerSec": 240000,
+    "interfaces": ["en0"]
+  },
   "uptimeSecs": 274320
 }

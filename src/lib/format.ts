@@ -69,6 +69,24 @@ export function formatWatts(watts: number | null | undefined): string {
   return `${text}${NBSP}W`;
 }
 
+const BYTES_PER_MEGABYTE = 1_000_000;
+const RATE_LIMIT_MB = 10_000;
+
+export function formatRate(bytesPerSec: number | null | undefined): string {
+  if (!isUsable(bytesPerSec) || bytesPerSec < 0) {
+    return PLACEHOLDER;
+  }
+  const rounded = roundTo(bytesPerSec / BYTES_PER_MEGABYTE, 1);
+  if (rounded < 100) {
+    return `${oneDecimalFormat.format(rounded)}${NBSP}MB/s`;
+  }
+  const whole = Math.round(rounded);
+  if (whole >= RATE_LIMIT_MB) {
+    return `${integerFormat.format(RATE_LIMIT_MB - 1)}+${NBSP}MB/s`;
+  }
+  return `${integerFormat.format(whole)}${NBSP}MB/s`;
+}
+
 export function formatCelsius(celsius: number | null | undefined): string {
   return isUsable(celsius) ? `${integerFormat.format(Math.round(celsius))}${NBSP}°C` : PLACEHOLDER;
 }

@@ -13,6 +13,7 @@ that platform yet. Updated at the end of each deliverable.
 | CPU MHz                        | macmon residency-weighted, per core                                                                                                                                                                             | IOReport ACNT/MCNT per logical CPU → nominal + speed limit                                                       | Unavailable                                               |
 | CPU temperature                | SMC firmware key `TCMb` (die average) → `TCMz` (max) via `macmon::sources::SMC`, valid 15–130 °C; fallback macmon `cpu_temp_avg` (source `macmon`); VM: Unavailable ("Máy ảo không cung cấp cảm biến nhiệt độ") | SMC key probed by presence `TCXC` → `TCXc` → `TC0D` → `TC0E` → `TC0F` → `TC0P`, valid 10–115 °C; VM: Unavailable | Unavailable ("Đang chạy qua Rosetta – hãy mở bản native") |
 | RAM                            | `host_statistics64` + `vm_page_size`                                                                                                                                                                            | same                                                                                                             | same                                                      |
+| Network rate                   | `sysctl` `NET_RT_IFLIST2` `if_data64` counters of `en*` interfaces                                                                                                                                              | same                                                                                                             | same                                                      |
 | Disks / Wi-Fi IP / uptime      | `getfsstat`, SystemConfiguration + `getifaddrs`, `kern.boottime`                                                                                                                                                | same                                                                                                             | same                                                      |
 
 ## Verification status (D1)
@@ -76,3 +77,11 @@ behaviour (macmon power, topology, budgets) stays **chưa kiểm chứng**.
 | Apple Silicon M1–M5                     | 14 / 15 / 26 / 27 | chưa kiểm chứng                                                                                          | chưa kiểm chứng (runs under Rosetta, expected Unavailable power, frequency and temperature) | chưa kiểm chứng (arm64 slice)                                                          | chưa kiểm chứng                                                                                                         |
 
 Developer ID signing, notarization and stapling: chưa kiểm chứng on every platform (no Developer ID).
+
+## Verification status (network throughput)
+
+| Platform                                | macOS             | Rate (counters, MB/s)                                   | Two-line menu bar image                                           | Popover card    |
+| --------------------------------------- | ----------------- | ------------------------------------------------------- | ----------------------------------------------------------------- | --------------- |
+| Intel Hackintosh i7-7700HQ (VirtualSMC) | 14.8.9            | verified on `en1` (Wi-Fi); see docs/verification.md     | verified at 1x, Dark appearance; Light appearance chưa kiểm chứng | mock only       |
+| Intel Mac (real hardware)               | 14 / 15 / 26      | chưa kiểm chứng                                         | chưa kiểm chứng (Retina 2x)                                       | chưa kiểm chứng |
+| Apple Silicon M1–M5                     | 14 / 15 / 26 / 27 | chưa kiểm chứng (compiled, tests built with `--no-run`) | chưa kiểm chứng                                                   | chưa kiểm chứng |

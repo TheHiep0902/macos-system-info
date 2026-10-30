@@ -19,6 +19,14 @@ describe('sparklinePoints', () => {
     expect(sparklinePoints([5, 10], 2, null)).toBe('0,57.7 1,19.3');
   });
 
+  it('draws an all-zero series on the baseline', () => {
+    expect(sparklinePoints([0, 0, 0], 3, 0)).toBe('0,96 1,96 2,96');
+  });
+
+  it('scales a non-negative series against its own maximum from zero', () => {
+    expect(sparklinePoints([0, 0.5, 2], 3, 2)).toBe('0,96 1,73 2,4');
+  });
+
   it('keeps only the newest points that fit', () => {
     expect(sparklinePoints([10, 20, 30, 40], 2, 100).split(' ')).toHaveLength(2);
   });

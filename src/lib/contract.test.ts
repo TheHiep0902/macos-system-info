@@ -104,6 +104,12 @@ const typed = {
       isWifiConnected: true,
       primaryInterface: 'en0',
     },
+    throughput: {
+      state: 'ok',
+      rxBytesPerSec: 12400000.5,
+      txBytesPerSec: 310000.25,
+      interfaces: ['en0'],
+    },
     uptimeSecs: 123456,
   },
   powerUnavailable: {

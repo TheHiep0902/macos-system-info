@@ -4,6 +4,7 @@ pub mod disks;
 pub mod memory;
 pub mod network;
 pub mod power;
+pub mod throughput;
 pub mod uptime;
 
 use std::any::Any;
@@ -15,6 +16,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use crate::model::{
     ClusterInfo, ClusterSample, CoreSample, CpuSample, DiskSample, FrequencySample, MemorySample,
     MetricState, NetworkSample, PowerSample, Snapshot, StaticInfo, TemperatureSample,
+    ThroughputSample,
 };
 use crate::platform::{self, HostFacts};
 use crate::sys::SysError;
@@ -29,6 +31,7 @@ use self::power::{
     Arch, FreqReading, FreqSlot, HostEnv, PowerBackend, PowerSlot, REASON_STALE_COUNTER,
     SAMPLE_INTERVAL, Selected, SourceError, TempReading, TempSlot, Tick,
 };
+use self::throughput::{CounterReader, IfCounters, ThroughputMeter};
 
 pub const GAP_THRESHOLD: Duration = Duration::from_secs(3);
 pub const CLOSED_REFRESH_EVERY: u64 = 5;
@@ -40,6 +43,7 @@ pub const BACKOFF_MAX: Duration = Duration::from_secs(60);
 pub const BACKOFF_RESET_AFTER: Duration = Duration::from_secs(300);
 
 const ZERO_WATTS_EPSILON: f32 = 0.001;
+const REASON_THROUGHPUT_UNAVAILABLE: &str = "Không đọc được lưu lượng mạng";
 
 #[derive(Debug, Default)]
 pub struct SharedState {
@@ -105,6 +109,8 @@ pub trait Sink {
     fn emit_snapshot(&self, snapshot: &Snapshot);
 
     fn emit_disks_changed(&self);
+
+    fn set_rate_lines(&self, _lines: Option<[String; 2]>) {}
 }
 
 pub trait SystemReaders {
@@ -117,6 +123,10 @@ pub trait SystemReaders {
     fn disks(&mut self, options: DiskScanOptions) -> Option<DiskScan>;
 
     fn network(&mut self) -> NetworkSample;
+
+    fn throughput(&mut self) -> Option<Vec<IfCounters>> {
+        None
+    }
 }
 
 pub struct Backend {
@@ -162,10 +172,12 @@ pub struct HostReaders {
     cpu: CpuLoadReader,
     disks: DiskScanner,
     network: NetworkReader,
+    counters: CounterReader,
     total_memory_bytes: u64,
     cpu_health: Health,
     memory_health: Health,
     disks_health: Health,
+    throughput_health: Health,
 }
 
 impl HostReaders {
@@ -174,10 +186,12 @@ impl HostReaders {
             cpu: CpuLoadReader::new(),
             disks: DiskScanner::new(),
             network: NetworkReader::new(),
+            counters: CounterReader::new(),
             total_memory_bytes,
             cpu_health: Health::default(),
             memory_health: Health::default(),
             disks_health: Health::default(),
+            throughput_health: Health::default(),
         }
     }
 }
@@ -202,6 +216,14 @@ impl SystemReaders for HostReaders {
 
     fn network(&mut self) -> NetworkSample {
         self.network.read()
+    }
+
+    fn throughput(&mut self) -> Option<Vec<IfCounters>> {
+        let result = self.counters.read().map_err(|source| SysError::Os {
+            call: "sysctl NET_RT_IFLIST2",
+            source,
+        });
+        self.throughput_health.observe("throughput", result)
     }
 }
 
@@ -656,6 +678,9 @@ struct LoopState {
     disks_loaded: bool,
     title: String,
     previous_sample: Option<SampleTime>,
+    throughput: ThroughputMeter,
+    throughput_state: MetricState<ThroughputSample>,
+    rate_lines: Option<Option<[String; 2]>>,
 }
 
 pub fn run_loop<C: Clock, S: Sink>(
@@ -682,6 +707,9 @@ pub fn run_loop<C: Clock, S: Sink>(
         disks_loaded: false,
         title: tray::INITIAL_TITLE.to_owned(),
         previous_sample: None,
+        throughput: ThroughputMeter::default(),
+        throughput_state: MetricState::Loading,
+        rate_lines: None,
     };
     if let Selected::Unavailable(reason) = &backend.power {
         state.power.set_unavailable(reason);
@@ -800,6 +828,16 @@ pub fn run_loop<C: Clock, S: Sink>(
             state.last_memory = Some(memory);
         }
 
+        if gap {
+            state.throughput.reset();
+        }
+        state.throughput_state = match backend.readers.throughput() {
+            Some(counters) => state.throughput.update(&counters, clock.now_instant()),
+            None => MetricState::Unavailable {
+                reason: REASON_THROUGHPUT_UNAVAILABLE.into(),
+            },
+        };
+
         let visible = shared.popover_visible.load(Ordering::Acquire);
         if visible || !state.disks_loaded || state.seq.is_multiple_of(CLOSED_REFRESH_EVERY) {
             let options = DiskScanOptions {
@@ -828,6 +866,14 @@ pub fn run_loop<C: Clock, S: Sink>(
             sink.set_title(&title);
             state.title = title;
         }
+        let rate_lines = shared
+            .title_metrics()
+            .network
+            .then(|| tray::format_rate_lines(&state.throughput_state));
+        if state.rate_lines.as_ref() != Some(&rate_lines) {
+            sink.set_rate_lines(rate_lines.clone());
+            state.rate_lines = Some(rate_lines);
+        }
 
         if let Some(load) = &state.last_cpu {
             let include_cores = shared.detail_enabled.load(Ordering::Relaxed);
@@ -840,6 +886,7 @@ pub fn run_loop<C: Clock, S: Sink>(
                 memory: state.last_memory.clone().unwrap_or_default(),
                 disks: state.disks.clone(),
                 network: state.network.clone(),
+                throughput: state.throughput_state.clone(),
                 uptime_secs: uptime_from_boot(
                     unix_seconds(wall),
                     backend.static_info.boot_time_unix,
@@ -930,6 +977,7 @@ mod tests {
         wall: Rc<Cell<SystemTime>>,
         sleeps: Cell<u32>,
         wall_jump: Option<(u32, Duration)>,
+        network_off_at: Option<u32>,
         stop: Option<(&'a SharedState, u32)>,
     }
 
@@ -940,6 +988,7 @@ mod tests {
                 wall: Rc::new(Cell::new(UNIX_EPOCH + Duration::from_secs(1_760_000_000))),
                 sleeps: Cell::new(0),
                 wall_jump: None,
+                network_off_at: None,
                 stop: Some((shared, stop_after_sleeps)),
             }
         }
@@ -976,6 +1025,14 @@ mod tests {
                 wall += jump;
             }
             self.wall.set(wall);
+            if self.network_off_at == Some(count)
+                && let Some((shared, _)) = self.stop
+            {
+                shared.set_title_metrics(TitleMetrics {
+                    network: false,
+                    ..shared.title_metrics()
+                });
+            }
             if let Some((shared, limit)) = self.stop
                 && count >= limit
             {
@@ -989,6 +1046,7 @@ mod tests {
         titles: RefCell<Vec<String>>,
         emitted: RefCell<Vec<Snapshot>>,
         disks_changed: Cell<u32>,
+        rate_lines: RefCell<Vec<Option<[String; 2]>>>,
     }
 
     impl Sink for RecordingSink {
@@ -1002,6 +1060,10 @@ mod tests {
 
         fn emit_disks_changed(&self) {
             self.disks_changed.set(self.disks_changed.get() + 1);
+        }
+
+        fn set_rate_lines(&self, lines: Option<[String; 2]>) {
+            self.rate_lines.borrow_mut().push(lines);
         }
     }
 
@@ -1084,6 +1146,7 @@ mod tests {
     struct FakeReaders {
         counters: Rc<Counters>,
         primed: bool,
+        traffic: Option<u64>,
     }
 
     impl SystemReaders for FakeReaders {
@@ -1125,6 +1188,16 @@ mod tests {
         fn network(&mut self) -> NetworkSample {
             NetworkSample::default()
         }
+
+        fn throughput(&mut self) -> Option<Vec<IfCounters>> {
+            let bytes = self.traffic.as_mut()?;
+            *bytes += 4_000_000;
+            Some(vec![IfCounters {
+                name: "en0".into(),
+                rx_bytes: *bytes,
+                tx_bytes: *bytes / 4,
+            }])
+        }
     }
 
     fn static_info() -> StaticInfo {
@@ -1161,6 +1234,7 @@ mod tests {
         counters: Rc<Counters>,
         readings: RefCell<VecDeque<Result<Option<f32>, SourceError>>>,
         panic_first_build: bool,
+        traffic: bool,
     }
 
     impl ScriptedFactory {
@@ -1169,6 +1243,7 @@ mod tests {
                 counters: Rc::new(Counters::default()),
                 readings: RefCell::new(readings.into()),
                 panic_first_build: false,
+                traffic: false,
             }
         }
     }
@@ -1191,6 +1266,7 @@ mod tests {
                 readers: Box::new(FakeReaders {
                     counters: Rc::clone(&self.counters),
                     primed: false,
+                    traffic: self.traffic.then_some(0),
                 }),
                 topology: Topology {
                     clusters: vec![cluster("CPU", 2)],
@@ -1451,6 +1527,117 @@ mod tests {
         );
     }
 
+    fn traffic_factory() -> ScriptedFactory {
+        ScriptedFactory {
+            traffic: true,
+            ..ScriptedFactory::new(Vec::new())
+        }
+    }
+
+    fn rate_lines(up: &str, down: &str) -> Option<[String; 2]> {
+        Some([format!("↑ {up}"), format!("↓ {down}")])
+    }
+
+    fn network_metrics() -> TitleMetrics {
+        TitleMetrics {
+            network: true,
+            ..TitleMetrics::default()
+        }
+    }
+
+    #[test]
+    fn throughput_needs_a_baseline_and_restarts_after_a_gap() {
+        let factory = traffic_factory();
+        let shared = SharedState::default();
+        shared.popover_visible.store(true, Ordering::Release);
+        let mut clock = FakeClock::new(&shared, 6);
+        clock.wall_jump = Some((3, Duration::from_secs(3_600)));
+        let sink = RecordingSink::default();
+        run_loop(&shared, &sink, &clock, factory.build());
+        let ok = MetricState::Ok(ThroughputSample {
+            rx_bytes_per_sec: 2_000_000.0,
+            tx_bytes_per_sec: 500_000.0,
+            interfaces: vec!["en0".into()],
+        });
+        let states: Vec<_> = sink
+            .emitted
+            .borrow()
+            .iter()
+            .map(|snapshot| snapshot.throughput.clone())
+            .collect();
+        assert_eq!(
+            states,
+            vec![
+                MetricState::Loading,
+                ok.clone(),
+                MetricState::Loading,
+                ok.clone(),
+                ok
+            ]
+        );
+    }
+
+    #[test]
+    fn missing_throughput_reader_is_unavailable() {
+        let factory = ScriptedFactory::new(Vec::new());
+        let shared = SharedState::default();
+        let clock = FakeClock::new(&shared, 3);
+        let sink = RecordingSink::default();
+        run_loop(&shared, &sink, &clock, factory.build());
+        let snapshot = shared.snapshot().expect("snapshot published");
+        assert_eq!(
+            snapshot.throughput,
+            MetricState::Unavailable {
+                reason: "Không đọc được lưu lượng mạng".into()
+            }
+        );
+        assert_eq!(*sink.rate_lines.borrow(), vec![None]);
+    }
+
+    #[test]
+    fn rate_lines_start_with_dashes_and_are_sent_only_on_change() {
+        let factory = traffic_factory();
+        let shared = SharedState::default();
+        shared.set_title_metrics(network_metrics());
+        let clock = FakeClock::new(&shared, 6);
+        let sink = RecordingSink::default();
+        run_loop(&shared, &sink, &clock, factory.build());
+        assert_eq!(
+            *sink.rate_lines.borrow(),
+            vec![rate_lines("–", "–"), rate_lines("0.5", "2.0")]
+        );
+        assert_eq!(*sink.titles.borrow(), vec![title("5.0")]);
+    }
+
+    #[test]
+    fn rate_lines_are_cleared_once_when_network_is_turned_off() {
+        let factory = traffic_factory();
+        let shared = SharedState::default();
+        shared.set_title_metrics(network_metrics());
+        let mut clock = FakeClock::new(&shared, 6);
+        clock.network_off_at = Some(3);
+        let sink = RecordingSink::default();
+        run_loop(&shared, &sink, &clock, factory.build());
+        assert_eq!(
+            *sink.rate_lines.borrow(),
+            vec![rate_lines("–", "–"), rate_lines("0.5", "2.0"), None]
+        );
+    }
+
+    #[test]
+    fn rate_lines_are_cleared_once_at_start_while_network_is_off() {
+        let factory = traffic_factory();
+        let shared = SharedState::default();
+        let clock = FakeClock::new(&shared, 6);
+        let sink = RecordingSink::default();
+        run_loop(&shared, &sink, &clock, factory.build());
+        assert_eq!(*sink.rate_lines.borrow(), vec![None]);
+        assert!(matches!(
+            shared.snapshot().expect("snapshot published").throughput,
+            MetricState::Ok(_)
+        ));
+    }
+
     #[test]
     fn unavailable_temperature_slot_is_reported_in_the_snapshot() {
         let shared = Arc::new(SharedState::default());
@@ -1673,6 +1860,7 @@ mod tests {
             readers: Box::new(FakeReaders {
                 counters: Rc::new(Counters::default()),
                 primed: false,
+                traffic: None,
             }),
             topology: Topology {
                 clusters: vec![cluster("CPU", 2)],
