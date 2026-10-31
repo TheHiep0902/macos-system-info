@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import contract from '../mocks/contract-snapshot.json';
 import settingsContract from '../mocks/contract-settings.json';
+import updateContract from '../mocks/contract-update.json';
 import { COMMANDS, EVENTS } from './ipc';
 import { HISTORY_CAPACITY, PopoverStore } from './store.svelte';
 import type { Transport } from './transport';
-import type { Settings, Snapshot, StaticInfo } from './types';
+import type { Settings, Snapshot, StaticInfo, UpdateState } from './types';
 
 type Responder = (args: Record<string, unknown> | undefined) => unknown;
 
@@ -110,9 +111,10 @@ describe('PopoverStore lifecycle', () => {
       `listen:${EVENTS.snapshot}`,
       `listen:${EVENTS.disksChanged}`,
       `listen:${EVENTS.popoverVisibility}`,
+      `listen:${EVENTS.updaterState}`,
     ]);
-    expect(transport.order.slice(0, 3)).toEqual(listens);
-    expect(firstInvoke).toBe(3);
+    expect(transport.order.slice(0, 4)).toEqual(listens);
+    expect(firstInvoke).toBe(4);
     expect(store.settings).toEqual(defaultSettings);
     expect(store.staticInfo).toEqual(baseStatic);
     expect(store.snapshot?.seq).toBe(10);
@@ -135,7 +137,7 @@ describe('PopoverStore lifecycle', () => {
     const transport = createTransport();
     const store = new PopoverStore(transport);
     await store.init();
-    expect(transport.listenerCount()).toBe(3);
+    expect(transport.listenerCount()).toBe(4);
     store.dispose();
     expect(transport.listenerCount()).toBe(0);
   });
@@ -503,4 +505,108 @@ describe('PopoverStore commands', () => {
       { height: 640 },
     ]);
   });
+});
+
+describe('PopoverStore updater', () => {
+  const idle = updateContract.idle as UpdateState;
+  const available = updateContract.available as UpdateState;
+  const downloading = updateContract.downloading as UpdateState;
+  const checking = updateContract.checking as UpdateState;
+
+  it('loads the update state on refresh', async () => {
+    const transport = createTransport();
+    transport.responders.set(COMMANDS.getUpdateState, () => available);
+    const store = new PopoverStore(transport);
+    await store.init();
+    expect(transport.callsTo(COMMANDS.getUpdateState)).toHaveLength(1);
+    expect(store.update).toEqual(available);
+  });
+
+  it('applies every pushed updater state', async () => {
+    const transport = createTransport();
+    transport.responders.set(COMMANDS.getUpdateState, () => idle);
+    const store = new PopoverStore(transport);
+    await store.init();
+    transport.emit(EVENTS.updaterState, checking);
+    expect(store.update).toEqual(checking);
+    transport.emit(EVENTS.updaterState, available);
+    expect(store.update).toEqual(available);
+  });
+
+  it('ignores updater events after dispose', async () => {
+    const transport = createTransport();
+    transport.responders.set(COMMANDS.getUpdateState, () => idle);
+    const store = new PopoverStore(transport);
+    await store.init();
+    const handlers = [...(transport.handlers.get(EVENTS.updaterState) ?? [])];
+    store.dispose();
+    for (const handler of handlers) {
+      handler(available);
+    }
+    expect(store.update).toEqual(idle);
+  });
+
+  it('keeps snapshot and settings when get_update_state fails', async () => {
+    const transport = createTransport();
+    transport.responders.set(COMMANDS.getUpdateState, () => {
+      throw new Error('updater not ready');
+    });
+    const store = new PopoverStore(transport);
+    await store.init();
+    expect(store.update).toBeNull();
+    expect(store.settings).toEqual(defaultSettings);
+    expect(store.snapshot?.seq).toBe(10);
+    expect(store.failures).toEqual([COMMANDS.getUpdateState]);
+    expect(store.dataFailed).toBe(false);
+    expect(store.actionFailed).toBe(false);
+  });
+
+  it('checks for updates with no arguments and stores the returned state', async () => {
+    const transport = createTransport();
+    transport.responders.set(COMMANDS.getUpdateState, () => idle);
+    transport.responders.set(COMMANDS.checkForUpdates, () => checking);
+    const store = new PopoverStore(transport);
+    await store.init();
+    await store.checkForUpdates();
+    expect(transport.callsTo(COMMANDS.checkForUpdates)).toEqual([
+      { command: COMMANDS.checkForUpdates, args: undefined },
+    ]);
+    expect(store.update).toEqual(checking);
+    expect(store.installAttempted).toBe(false);
+  });
+
+  it('installs with no arguments, remembers the attempt and clears it on the next check', async () => {
+    const transport = createTransport();
+    transport.responders.set(COMMANDS.getUpdateState, () => available);
+    transport.responders.set(COMMANDS.installUpdate, () => downloading);
+    transport.responders.set(COMMANDS.checkForUpdates, () => checking);
+    const store = new PopoverStore(transport);
+    await store.init();
+    await store.installUpdate();
+    expect(transport.callsTo(COMMANDS.installUpdate)).toEqual([
+      { command: COMMANDS.installUpdate, args: undefined },
+    ]);
+    expect(store.update).toEqual(downloading);
+    expect(store.installAttempted).toBe(true);
+    await store.checkForUpdates();
+    expect(store.installAttempted).toBe(false);
+  });
+
+  it.each([COMMANDS.checkForUpdates, COMMANDS.installUpdate])(
+    'reports a failing %s as an action failure and keeps the last state',
+    async (command) => {
+      const transport = createTransport();
+      transport.responders.set(COMMANDS.getUpdateState, () => available);
+      transport.responders.set(command, () => {
+        throw new Error('ipc down');
+      });
+      const store = new PopoverStore(transport);
+      await store.init();
+      await (command === COMMANDS.checkForUpdates
+        ? store.checkForUpdates()
+        : store.installUpdate());
+      expect(store.update).toEqual(available);
+      expect(store.actionFailed).toBe(true);
+    },
+  );
 });

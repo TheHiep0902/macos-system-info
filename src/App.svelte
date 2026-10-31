@@ -6,6 +6,7 @@
   import NetworkCard from './components/cards/NetworkCard.svelte';
   import PowerCard from './components/cards/PowerCard.svelte';
   import TemperatureCard from './components/cards/TemperatureCard.svelte';
+  import UpdateBanner from './components/cards/UpdateBanner.svelte';
   import UptimeCard from './components/cards/UptimeCard.svelte';
   import CpuDetailView from './components/cpu/CpuDetailView.svelte';
   import Footer from './components/layout/Footer.svelte';
@@ -21,6 +22,7 @@
     resolveTheme,
   } from './lib/theme';
   import type { PopoverView, Settings } from './lib/types';
+  import { showUpdateBanner } from './lib/update';
 
   interface Props {
     store: PopoverStore;
@@ -92,6 +94,14 @@
     void store.openLoginItemsSettings();
   }
 
+  function checkForUpdates(): void {
+    void store.checkForUpdates();
+  }
+
+  function installUpdate(): void {
+    void store.installUpdate();
+  }
+
   function onKeydown(event: KeyboardEvent): void {
     if (event.key === 'Escape' && !event.defaultPrevented) {
       event.preventDefault();
@@ -122,6 +132,9 @@
     onback={() => void navigate('overview')}
     onquit={quit}
     onopenloginitems={openLoginItemsSettings}
+    update={store.update}
+    oncheckupdates={checkForUpdates}
+    oninstallupdate={installUpdate}
   />
 {:else}
   <PopoverShell
@@ -131,6 +144,13 @@
     footer={overviewFooter}
     busy={store.snapshot === null}
   >
+    {#if store.update !== null && showUpdateBanner(store.update, store.installAttempted)}
+      <UpdateBanner
+        update={store.update}
+        oninstall={installUpdate}
+        onopenloginitems={openLoginItemsSettings}
+      />
+    {/if}
     <CpuCard
       bind:buttonRef={cpuButton}
       snapshot={store.snapshot}

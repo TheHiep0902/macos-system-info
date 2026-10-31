@@ -86,11 +86,21 @@ Developer ID signing, notarization and stapling: chưa kiểm chứng on every p
 | Intel Mac (real hardware)               | 14 / 15 / 26      | chưa kiểm chứng                                         | chưa kiểm chứng (Retina 2x)                                       | chưa kiểm chứng |
 | Apple Silicon M1–M5                     | 14 / 15 / 26 / 27 | chưa kiểm chứng (compiled, tests built with `--no-run`) | chưa kiểm chứng                                                   | chưa kiểm chứng |
 
+## Verification status (in-app updater)
+
+| Platform                                | macOS             | Check (manual, automatic)                                                                               | Download, signature, install, relaunch                                                                                                | Launch at login after update                                                                                            | `/Applications`, App Management, admin password                                         |
+| --------------------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Intel Hackintosh i7-7700HQ (VirtualSMC) | 14.8.9            | verified against a local endpoint (first automatic check at 60 s); real GitHub endpoint chưa kiểm chứng | verified (x86_64 test builds under `~/Applications`, refusal cases: signature, version mismatch, timeouts, size limit, http URL, DMG) | verified with caveat: registered again, notification shown again, two duplicate entries; starts once after log out / in | `/Applications` and App Management verified (no dialog); admin password chưa kiểm chứng |
+| Intel Mac (real hardware)               | 14 / 15 / 26      | chưa kiểm chứng                                                                                         | chưa kiểm chứng                                                                                                                       | chưa kiểm chứng                                                                                                         | chưa kiểm chứng                                                                         |
+| Apple Silicon M1–M5                     | 14 / 15 / 26 / 27 | chưa kiểm chứng (compiled, tests built with `--no-run`)                                                 | chưa kiểm chứng                                                                                                                       | chưa kiểm chứng                                                                                                         | chưa kiểm chứng                                                                         |
+
+Details and the refusal cases are in docs/verification.md (D9).
+
 ## Releases
 
-| Release | Type        | Assets                                  | Built on                                    |
-| ------- | ----------- | --------------------------------------- | ------------------------------------------- |
-| v0.1.0  | pre-release | `aarch64` and `x64` DMGs + `SHA256SUMS` | Intel Hackintosh (dev host), from `f5ccb49` |
-| v0.2.0  | release     | `aarch64` and `x64` DMGs + `SHA256SUMS` | Intel Hackintosh (dev host)                 |
+| Release | Type             | Assets                                  | Built on                                    |
+| ------- | ---------------- | --------------------------------------- | ------------------------------------------- |
+| v0.1.0  | pre-release      | `aarch64` and `x64` DMGs + `SHA256SUMS` | Intel Hackintosh (dev host), from `f5ccb49` |
+| v0.2.0  | release (latest) | `aarch64` and `x64` DMGs + `SHA256SUMS` | Intel Hackintosh (dev host), from `3c96798` |
 
-Results per release are in docs/verification.md ("GitHub releases").
+v0.1.0 and v0.2.0 have no in-app updater. Results per release are in docs/verification.md ("GitHub releases").

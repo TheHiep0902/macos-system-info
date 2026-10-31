@@ -1,12 +1,19 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { COMMANDS, EVENTS } from '../lib/ipc';
-import type { Settings, Snapshot, StaticInfo } from '../lib/types';
+import type { Settings, Snapshot, StaticInfo, UpdateState } from '../lib/types';
 import settingsContract from './contract-settings.json';
+import updateContract from './contract-update.json';
 import appleSnapshot from './snapshot-apple-silicon.json';
 import intelSnapshot from './snapshot-intel.json';
 import appleStatic from './static-apple-silicon.json';
 import intelStatic from './static-intel.json';
-import { createMockTransport, parseScenario } from './transport';
+import {
+  UPDATE_CHECK_MS,
+  UPDATE_TICK_MS,
+  UPDATE_TOTAL_BYTES,
+  createMockTransport,
+  parseScenario,
+} from './transport';
 
 type JsonShape<T> = T extends string
   ? string
@@ -105,7 +112,7 @@ describe('parseScenario', () => {
   it('reads every supported query parameter', () => {
     const scenario = parseScenario(
       new URLSearchParams(
-        'platform=intel&theme=dark&view=cpu-detail&wifi=off&power=unavailable&temperature=unavailable&throughput=unavailable&state=loading&rosetta=on&login=requiresApproval',
+        'platform=intel&theme=dark&view=cpu-detail&wifi=off&power=unavailable&temperature=unavailable&throughput=unavailable&state=loading&rosetta=on&login=requiresApproval&update=post',
       ),
     );
     expect(scenario).toEqual({
@@ -119,6 +126,7 @@ describe('parseScenario', () => {
       loading: true,
       rosetta: true,
       login: 'requiresApproval',
+      update: 'post',
     });
   });
 
@@ -148,6 +156,7 @@ describe('parseScenario', () => {
       loading: false,
       rosetta: false,
       login: null,
+      update: 'idle',
     });
   });
 });
@@ -341,5 +350,103 @@ describe('mock backend throughput', () => {
     for (const snapshot of await seededSnapshots(query)) {
       expect(snapshot.throughput).toEqual(expected);
     }
+  });
+});
+
+describe('mock backend updater', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  async function setup(query: string) {
+    const { transport } = createMockTransport(new URLSearchParams(query));
+    const pushed: UpdateState[] = [];
+    await transport.listen<UpdateState>(EVENTS.updaterState, (state) => {
+      pushed.push(state);
+    });
+    return { transport, pushed };
+  }
+
+  it.each([
+    ['', updateContract.idle],
+    ['update=uptodate', updateContract.upToDate],
+    ['update=available', updateContract.available],
+    ['update=downloading', updateContract.downloading],
+    ['update=installing', updateContract.installing],
+    ['update=failed', updateContract.failed],
+    ['update=blocked', updateContract.blocked],
+    ['update=post', updateContract.postUpdate],
+    ['update=bogus', updateContract.idle],
+  ])('seeds the scenario %j from the contract fixture', async (query, expected) => {
+    const { transport } = await setup(query);
+    expect(await transport.invoke<UpdateState>(COMMANDS.getUpdateState)).toEqual({
+      ...(expected as UpdateState),
+      autoCheck: true,
+    });
+  });
+
+  it('goes from checking to available after a short delay', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(5_000_000);
+    const { transport, pushed } = await setup('');
+    const returned = await transport.invoke<UpdateState>(COMMANDS.checkForUpdates);
+    expect(returned.phase).toEqual({ kind: 'checking' });
+    vi.advanceTimersByTime(UPDATE_CHECK_MS);
+    expect(pushed.map((state) => state.phase.kind)).toEqual(['checking', 'available']);
+    expect(pushed.at(-1)?.lastCheckAt).toBe(5_000_000 + UPDATE_CHECK_MS);
+  });
+
+  it('reports up to date in the uptodate scenario and ignores a check while busy', async () => {
+    vi.useFakeTimers();
+    const { transport, pushed } = await setup('update=uptodate');
+    await transport.invoke(COMMANDS.checkForUpdates);
+    await transport.invoke(COMMANDS.checkForUpdates);
+    vi.advanceTimersByTime(UPDATE_CHECK_MS);
+    expect(pushed.map((state) => state.phase.kind)).toEqual(['checking', 'upToDate']);
+  });
+
+  it('downloads with progress ticks, then stays installing', async () => {
+    vi.useFakeTimers();
+    const { transport, pushed } = await setup('update=available');
+    const returned = await transport.invoke<UpdateState>(COMMANDS.installUpdate);
+    expect(returned.phase).toEqual({ kind: 'downloading', received: 0, total: UPDATE_TOTAL_BYTES });
+    vi.advanceTimersByTime(UPDATE_TICK_MS * 10);
+    const kinds = pushed.map((state) => state.phase.kind);
+    expect(kinds.at(-1)).toBe('installing');
+    expect(kinds.filter((kind) => kind === 'downloading').length).toBeGreaterThan(2);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('ends the install in a signature failure in the failed scenario', async () => {
+    vi.useFakeTimers();
+    const { transport, pushed } = await setup('update=failed');
+    await transport.invoke(COMMANDS.checkForUpdates);
+    vi.advanceTimersByTime(UPDATE_CHECK_MS);
+    await transport.invoke(COMMANDS.installUpdate);
+    vi.advanceTimersByTime(UPDATE_TICK_MS * 10);
+    expect(pushed.at(-1)?.phase).toEqual({ kind: 'failed', error: 'signature' });
+  });
+
+  it('ignores install when no update is available', async () => {
+    const { transport, pushed } = await setup('update=uptodate');
+    const returned = await transport.invoke<UpdateState>(COMMANDS.installUpdate);
+    expect(returned.phase).toEqual({ kind: 'upToDate' });
+    expect(pushed).toEqual([]);
+  });
+
+  it('mirrors autoCheckUpdates into the update state', async () => {
+    const { transport, pushed } = await setup('');
+    const current = await transport.invoke<Settings>(COMMANDS.getSettings);
+    expect(current.autoCheckUpdates).toBe(true);
+    await transport.invoke(COMMANDS.setSettings, {
+      settings: { ...current, autoCheckUpdates: false },
+    });
+    expect(pushed.at(-1)?.autoCheck).toBe(false);
+    expect((await transport.invoke<UpdateState>(COMMANDS.getUpdateState)).autoCheck).toBe(false);
+  });
+
+  it('still rejects unknown commands', async () => {
+    const { transport } = await setup('');
+    await expect(transport.invoke('nope')).rejects.toThrow('mock: unknown command nope');
   });
 });

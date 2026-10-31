@@ -13,6 +13,9 @@
     "allow-hide-popover",
     "allow-resize-popover",
     "allow-quit-app",
-    "allow-open-login-items-settings"
+    "allow-open-login-items-settings",
+    "allow-get-update-state",
+    "allow-check-for-updates",
+    "allow-install-update"
   ]
 }

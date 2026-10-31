@@ -13,6 +13,8 @@ pub mod sys;
 pub mod topology;
 pub mod tray;
 pub mod tray_image;
+pub mod updater;
+pub mod updater_state;
 
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver};
@@ -88,6 +90,7 @@ pub fn run() {
                 log::warn!("could not open the popover for a second launch: {err}");
             }
         }))
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(AppState(Arc::clone(&shared)))
         .manage(PopoverState::default())
         .invoke_handler(tauri::generate_handler![
@@ -99,7 +102,10 @@ pub fn run() {
             ipc::hide_popover,
             ipc::resize_popover,
             ipc::quit_app,
-            ipc::open_login_items_settings
+            ipc::open_login_items_settings,
+            ipc::get_update_state,
+            ipc::check_for_updates,
+            ipc::install_update
         ])
         .setup(|app| {
             app.set_activation_policy(ActivationPolicy::Accessory);
@@ -116,6 +122,7 @@ pub fn run() {
             )?;
             app.manage(TrayHandle { _tray: tray });
             app.manage(menu);
+            updater::start(handle);
             if !current.memory_saver
                 && let Err(err) = popover::create(handle, &current)
             {

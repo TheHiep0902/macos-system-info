@@ -1,6 +1,13 @@
 import { COMMANDS, EVENTS, POPOVER_MAX_HEIGHT, POPOVER_MIN_HEIGHT } from './ipc';
 import type { Transport } from './transport';
-import type { PopoverView, PopoverVisibility, Settings, Snapshot, StaticInfo } from './types';
+import type {
+  PopoverView,
+  PopoverVisibility,
+  Settings,
+  Snapshot,
+  StaticInfo,
+  UpdateState,
+} from './types';
 
 export const HISTORY_CAPACITY = 60;
 
@@ -39,6 +46,8 @@ const ACTION_COMMANDS: readonly CommandName[] = [
   COMMANDS.quitApp,
   COMMANDS.setDetailEnabled,
   COMMANDS.openLoginItemsSettings,
+  COMMANDS.checkForUpdates,
+  COMMANDS.installUpdate,
 ];
 
 function appendBounded(values: readonly number[], value: number): readonly number[] {
@@ -73,6 +82,8 @@ export class PopoverStore {
   settingsError = $state(false);
   liveUpdatesFailed = $state(false);
   failures = $state.raw<readonly CommandName[]>([]);
+  update = $state.raw<UpdateState | null>(null);
+  installAttempted = $state(false);
 
   readonly #transport: Transport;
   readonly #unlisteners: (() => void)[] = [];
@@ -120,10 +131,11 @@ export class PopoverStore {
   }
 
   async refresh(): Promise<void> {
-    const [settings, staticInfo, snapshot] = await Promise.all([
+    const [settings, staticInfo, snapshot, update] = await Promise.all([
       this.#call<Settings>(COMMANDS.getSettings),
       this.#call<StaticInfo | null>(COMMANDS.getStaticInfo),
       this.#call<Snapshot | null>(COMMANDS.getSnapshot),
+      this.#call<UpdateState>(COMMANDS.getUpdateState),
     ]);
     if (this.#disposed) {
       return;
@@ -137,6 +149,9 @@ export class PopoverStore {
     }
     if (snapshot.ok && snapshot.value !== null) {
       this.#applySnapshot(snapshot.value);
+    }
+    if (update.ok) {
+      this.update = update.value;
     }
   }
 
@@ -179,6 +194,16 @@ export class PopoverStore {
     await this.#call<void>(COMMANDS.openLoginItemsSettings);
   }
 
+  async checkForUpdates(): Promise<void> {
+    this.installAttempted = false;
+    await this.#updateCommand(COMMANDS.checkForUpdates);
+  }
+
+  async installUpdate(): Promise<void> {
+    this.installAttempted = true;
+    await this.#updateCommand(COMMANDS.installUpdate);
+  }
+
   async resize(contentHeight: number): Promise<void> {
     if (!Number.isFinite(contentHeight)) {
       return;
@@ -204,6 +229,9 @@ export class PopoverStore {
       this.#transport.listen<PopoverVisibility>(EVENTS.popoverVisibility, (payload) =>
         this.#onVisibility(payload),
       ),
+      this.#transport.listen<UpdateState>(EVENTS.updaterState, (payload) =>
+        this.#onUpdateState(payload),
+      ),
     ]);
     for (const result of results) {
       if (result.status === 'rejected') {
@@ -223,6 +251,20 @@ export class PopoverStore {
     }
     this.visible = true;
     this.#applySnapshot(snapshot);
+  }
+
+  #onUpdateState(state: UpdateState): void {
+    if (this.#disposed) {
+      return;
+    }
+    this.update = state;
+  }
+
+  async #updateCommand(command: CommandName): Promise<void> {
+    const result = await this.#call<UpdateState>(command);
+    if (result.ok && !this.#disposed) {
+      this.update = result.value;
+    }
   }
 
   #onDisksChanged(): void {

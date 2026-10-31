@@ -13,6 +13,7 @@
     "reduceEffects": true,
     "showNetworkDisks": true,
     "memorySaver": true,
+    "autoCheckUpdates": false,
     "launchAtLogin": true,
     "launchAtLoginStatus": "enabled",
     "launchAtLoginReason": null
@@ -31,6 +32,7 @@
     "reduceEffects": false,
     "showNetworkDisks": false,
     "memorySaver": false,
+    "autoCheckUpdates": true,
     "launchAtLogin": false,
     "launchAtLoginStatus": "disabled",
     "launchAtLoginReason": null

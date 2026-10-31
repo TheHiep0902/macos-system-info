@@ -17,7 +17,9 @@ macOS 14 or later, on Apple Silicon and Intel Macs, without sudo, kernel extensi
   interface and IP addresses), uptime, boot time, macOS version and model,
   and the settings.
 - **Right-click menu**: "Mở Pulsebar" (Open Pulsebar), "Khởi động cùng macOS" (Launch at login),
-  "Cài đặt…" (Settings…), "Thoát" (Quit).
+  "Cài đặt…" (Settings…), "Kiểm tra cập nhật…" (Check for updates…), "Thoát" (Quit).
+- **Updates**: checks GitHub Releases once a day (on by default) and installs a signed update in
+  place only when you click "Cập nhật" (Update); see [Updates](#updates).
 
 The UI text is Vietnamese. Labels quoted in this README are the exact UI strings, followed by an
 English gloss.
@@ -41,8 +43,10 @@ the Apple Silicon build has not been run on a real Apple Silicon Mac yet. Detail
 - [Data sources](#data-sources)
 - [Performance](#performance)
 - [Signing and notarization](#signing-and-notarization)
+- [Releasing](#releasing)
 - [Installing and opening an un-notarized build](#installing-and-opening-an-un-notarized-build)
 - [Launch at login](#launch-at-login)
+- [Updates](#updates)
 - [Logs](#logs)
 - [Theme customization](#theme-customization)
 - [FAQ](#faq)
@@ -84,12 +88,18 @@ Mac behaves.
 ## Download
 
 Releases: <https://github.com/TheHiep0902/macos-system-info/releases>. The repository is private,
-so only accounts with access can download them.
+so only accounts with access can download them. The in-app updater needs the releases to be public
+(see [Releasing](#releasing)).
 
 | Release | Type             | Contents                                                             |
 | ------- | ---------------- | -------------------------------------------------------------------- |
 | v0.2.0  | release (latest) | `Pulsebar_0.2.0_aarch64.dmg`, `Pulsebar_0.2.0_x64.dmg`, `SHA256SUMS` |
 | v0.1.0  | pre-release      | `Pulsebar_0.1.0_aarch64.dmg`, `Pulsebar_0.1.0_x64.dmg`, `SHA256SUMS` |
+
+v0.1.0 and v0.2.0 have no in-app updater: install a later release from a DMG once, and from then
+on Pulsebar can update itself ([Updates](#updates)). Releases with the updater also carry
+`Pulsebar_<version>_aarch64.app.tar.gz`, `Pulsebar_<version>_x64.app.tar.gz`, their `.sig` files and
+`latest.json`; those are for the updater, not for a manual install.
 
 1. Pick the DMG for your Mac: `aarch64` for Apple Silicon (M1 and later), `x64` for Intel.
    `uname -m` prints `arm64` on Apple Silicon and `x86_64` on Intel.
@@ -501,6 +511,8 @@ CI (`.github/workflows/ci.yml`) runs all of these on `macos-26` (arm64) and `mac
 
 `CI=true` makes the DMG bundler skip the Finder AppleScript that lays out the DMG window, so the
 build triggers no Automation (TCC) prompt. Each build runs `pnpm build` for the frontend first.
+These builds need no updater key and produce no updater package; the signed release builds
+(`pnpm release:arm64`, `pnpm release:x64`) are described in [Releasing](#releasing).
 
 Outputs, with `<triple>` one of `aarch64-apple-darwin`, `x86_64-apple-darwin`,
 `universal-apple-darwin`:
@@ -553,6 +565,7 @@ main thread (AppKit / Tauri event loop)          "sampler" thread (std::thread, 
   popover WebviewWindow "popover" (WKWebView) <--  metrics://snapshot (only while visible)
   IPC commands (get_snapshot, set_settings…)  -->  shared state (latest snapshot, flags)
   settings.json, SMAppService                        backends: power, frequency, temperature
+  updater://state, tray update item           <--  "pulsebar-updater" thread (check, download, install)
 ```
 
 - **Process**: one Pulsebar process with `ActivationPolicy::Accessory` (no Dock icon), plus the
@@ -591,7 +604,26 @@ main thread (AppKit / Tauri event loop)          "sampler" thread (std::thread, 
 - **Settings**: `~/Library/Application Support/com.thehiep.pulsebar/settings.json`, validated by Rust
   (invalid fields fall back to defaults, files over 64 KiB are rejected) and written atomically
   (temporary file, then rename). The launch-at-login state is read from `SMAppService`, not from
-  this file.
+  this file. `autoCheckUpdates` (default `true`; a file without the key reads as `true`) turns the
+  automatic update check on or off.
+- **Updater**: `src-tauri/src/updater.rs` runs `tauri-plugin-updater` 2.14.1 (`native-tls`,
+  `system-proxy`) on one named `pulsebar-updater` thread. A state machine holds the phase (`idle`,
+  `checking`, `upToDate`, `available`, `downloading`, `installing`, `failed`, `blocked`), the pending
+  release and the schedule; commands from the webview or the tray only change the state and wake the
+  thread, so they return at once. The webview never passes a URL or version: it can only ask Rust to
+  check or to install the release Rust already holds, and it gets no `updater:*` or `process:*`
+  permission. The package is downloaded by Pulsebar itself (`reqwest`, https only, size checked
+  before and while reading), then verified and installed by the plugin; the app relaunches through
+  `request_restart` on the main thread so the single-instance socket is released. Every state change
+  is emitted as `updater://state` to the popover and updates the tray item. Failures are logged and
+  never stop the app.
+- **Updater state**: `src-tauri/src/updater_state.rs` keeps
+  `~/Library/Application Support/com.thehiep.pulsebar/updater-state.json` (at most 4 KiB, written
+  atomically): `lastCheckAt` (Unix milliseconds of the last successful check) and a transient
+  `pending` marker (`fromVersion`, `launchAtLoginWasOn`) written just before an install. On the next
+  start, a newer version with a `pending` marker shows the "updated" notice and, if needed,
+  registers the login item again; the marker is then removed and `lastCheckAt` is kept. Invalid
+  fields are ignored.
 
 IPC surface (names in `src/lib/ipc.ts`, payload types in `src/lib/types.ts`):
 
@@ -606,9 +638,13 @@ IPC surface (names in `src/lib/ipc.ts`, payload types in `src/lib/types.ts`):
 | command | `resize_popover`            | set the popover height (clamped to 200–640)                              |
 | command | `quit_app`                  | quit                                                                     |
 | command | `open_login_items_settings` | open System Settings › General › Login Items                             |
+| command | `get_update_state`          | current updater state (version, auto check, last check, phase, notice)   |
+| command | `check_for_updates`         | start a check (ignored while busy); returns the state at once            |
+| command | `install_update`            | install the release found by the last check; returns the state at once   |
 | event   | `metrics://snapshot`        | a new sample every 2 s, only while the popover is visible                |
 | event   | `disks://changed`           | a volume was mounted or unmounted                                        |
 | event   | `popover://visibility`      | the popover was shown or hidden (and which view to show)                 |
+| event   | `updater://state`           | the updater state changed (while downloading: after 250 ms or 1 % more)  |
 
 ## Data sources
 
@@ -760,6 +796,145 @@ spctl -a -vv -t open --context context:primary-signature src-tauri/target/aarch6
 `spctl` rejects an ad-hoc build (measured: `rejected` for the arm64, x86_64 and universal apps); that
 is expected until the build is signed with Developer ID and notarized.
 
+## Releasing
+
+For the maintainer. A release publishes the two DMGs for manual installs and the signed updater
+packages plus `latest.json` for the in-app updater. Everything runs on the maintainer's Mac; the
+updater key never leaves it, and CI never needs it.
+
+Requirement: the releases must be downloadable without signing in. `latest.json` and the packages
+are fetched anonymously, so the repository (or wherever the releases live) must be public; assets of
+a private repository need authentication and every installed copy reports a network error.
+
+### One-time: the updater signing key
+
+1. Create the key pair and choose a password when asked:
+
+```bash
+pnpm tauri signer generate -w ~/.tauri/pulsebar-updater.key
+chmod 600 ~/.tauri/pulsebar-updater.key
+```
+
+2. Back up `~/.tauri/pulsebar-updater.key` and its password in a password manager (two separate
+   entries are fine). The key file is useless without the password, and the password without the
+   file.
+3. Put the content of `~/.tauri/pulsebar-updater.key.pub` (one base64 line) into
+   `plugins.updater.pubkey` in `src-tauri/tauri.conf.json`, replacing the placeholder, and commit it.
+   The public key is not secret. A Rust test fails while the placeholder is still there, and
+   `pnpm release:assets` refuses to run.
+
+Warnings:
+
+- **Losing the key or its password** means no further update can be delivered to existing installs:
+  they only accept packages signed by the key built into them. Users then have to reinstall by hand
+  from a DMG built with a new key.
+- **A leaked key** lets anyone who can serve a `latest.json` to your users sign a package they will
+  accept. Rotate: create a new key, put the new public key in `tauri.conf.json`, publish a release
+  signed with the new key, tell users to reinstall it from the DMG by hand, and delete the releases
+  (at least their `.sig` and `.tar.gz` assets) signed with the leaked key.
+- Never commit the private key, never paste it or its password on a command line (shell history),
+  and never put it in CI secrets for this project.
+
+### Per release
+
+1. Bump the version everywhere: `version` in `src-tauri/tauri.conf.json`, `version` in
+   `src-tauri/Cargo.toml` (then refresh `src-tauri/Cargo.lock`, for example with
+   `cargo check --manifest-path src-tauri/Cargo.toml`), `version` in `package.json`, and the DMG
+   names in this README (`Pulsebar_<version>_aarch64.dmg` in [Build](#build),
+   [Signing and notarization](#signing-and-notarization),
+   [Installing and opening an un-notarized build](#installing-and-opening-an-un-notarized-build)
+   and the [Download](#download) table). The updater only offers a version greater than the
+   installed one (semver).
+2. Run the local gates, commit and push to `main`, and wait for CI.
+3. In your own terminal, load the key without echoing the password:
+
+```bash
+export TAURI_SIGNING_PRIVATE_KEY="$HOME/.tauri/pulsebar-updater.key"
+read -s TAURI_SIGNING_PRIVATE_KEY_PASSWORD; export TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+```
+
+4. Build both architectures from the clean, committed tree:
+
+```bash
+pnpm release:arm64
+pnpm release:x64
+```
+
+These are the `build:*` commands plus `--config src-tauri/tauri.release.conf.json`, an overlay
+that only sets `bundle.createUpdaterArtifacts: true`. Next to each `Pulsebar.app` Tauri writes
+`Pulsebar.app.tar.gz` and its minisign signature `Pulsebar.app.tar.gz.sig` (the signature's trusted
+comment carries the version, which the app checks). Without the key these two builds fail; the
+normal `pnpm build:*` builds and CI never sign anything.
+
+5. Write the release notes to a plain-text file outside the repository (it must not dirty the
+   tree), for example `$TMPDIR/pulsebar-notes.txt`. The updater shows them as plain text, so keep
+   them short; the app shows at most 2,000 characters.
+6. Assemble and check the assets (`<sha>` is the full 40-character commit SHA of `HEAD`,
+   `git rev-parse HEAD`; `--out` must not exist yet or be an empty directory):
+
+```bash
+pnpm release:assets --version <version> --commit <sha> --notes "$TMPDIR/pulsebar-notes.txt" --out "$TMPDIR/pulsebar-release-<version>"
+```
+
+Do not put `--` between `release:assets` and the flags: pnpm passes it on to the script, which
+rejects it with the usage line. `--repo <owner/name>` is optional (default
+`TheHiep0902/macos-system-info`) and goes into the download URLs.
+
+The script stops with a message, and writes nothing, when:
+
+- an argument is unknown, repeated or missing (`--version`, `--commit`, `--notes`, `--out` are
+  required), `--version` is not strict semver, `--commit` is not a full lowercase 40-hex SHA, or
+  `--repo` is not `owner/name`;
+- `HEAD` is not `--commit`, or `git status --porcelain` is not empty;
+- `plugins.updater.pubkey` in `src-tauri/tauri.conf.json` is missing, the placeholder, or not an
+  Ed25519 minisign public key;
+- `--out` exists and is not an empty directory;
+- the notes file cannot be read, is empty after trimming, or has more than 10,000 characters;
+- for each of `aarch64-apple-darwin` and `x86_64-apple-darwin` (both are required): the
+  `Pulsebar.app`, `Pulsebar.app.tar.gz`, `Pulsebar.app.tar.gz.sig` or `Pulsebar_<version>_<arch>.dmg`
+  under `src-tauri/target/<triple>/release/bundle/` is missing;
+- the app's `CFBundleShortVersionString` is not `--version`, its `CFBundleExecutable` is not a plain
+  file name, or `lipo -archs` of the executable is not exactly `arm64` (aarch64) or `x86_64` (x64),
+  so a universal binary is refused;
+- the tarball is empty, has an absolute path or `..`, or does not hold exactly one top-level
+  `Pulsebar.app`, or the app inside it fails the same version and architecture checks;
+- the `.sig` is not a minisign signature, was made with a key whose key ID differs from the
+  `pubkey`, does not verify over the tarball (Ed25519 over the BLAKE2b-512 hash, or over the raw
+  file for legacy signatures), has an invalid global signature over its trusted comment, or its
+  trusted comment carries no `version:` or another version than `--version`;
+- `git`, `plutil`, `lipo` or `tar` fails or runs longer than 5 minutes.
+
+On success it writes, through a temporary directory renamed into place, 8 files to `--out`:
+
+| File                                         | Content                                                                                                                                                                                                                                                                                |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Pulsebar_<version>_aarch64.app.tar.gz`      | the arm64 updater package (copy of `Pulsebar.app.tar.gz`, renamed so both architectures fit in one release)                                                                                                                                                                            |
+| `Pulsebar_<version>_aarch64.app.tar.gz.sig`  | its signature                                                                                                                                                                                                                                                                          |
+| `Pulsebar_<version>_x64.app.tar.gz` / `.sig` | the same for x86_64                                                                                                                                                                                                                                                                    |
+| `Pulsebar_<version>_aarch64.dmg`, `_x64.dmg` | the DMGs for manual installs                                                                                                                                                                                                                                                           |
+| `latest.json`                                | `version`, `notes` (your notes plus a final `Commit: <sha>` line), `pub_date` (RFC 3339, UTC), and `platforms.darwin-aarch64` / `platforms.darwin-x86_64`, each with the `.sig` content as `signature` and `https://github.com/<repo>/releases/download/v<version>/<tarball>` as `url` |
+| `SHA256SUMS`                                 | SHA-256 of the 7 other files, sorted by name (`shasum -a 256 -c SHA256SUMS`)                                                                                                                                                                                                           |
+
+It then prints a `gh release create v<version> <the 8 files> --repo <repo> --target <sha> --title
+"Pulsebar <version>" --notes-file <notes> --latest` command. The script never runs `gh` itself.
+
+7. Check the DMGs as for any build (`hdiutil verify`, mount read-only, `codesign --verify --strict`
+   on the app inside; see [Build](#build)), then run the printed command. Publish a full release
+   marked latest, never a draft or a pre-release: `releases/latest/download/latest.json` only
+   follows the latest full release, so the updater would never see it.
+8. Verify after publishing:
+
+```bash
+curl -sIL https://github.com/TheHiep0902/macos-system-info/releases/latest/download/latest.json
+curl -sL https://github.com/TheHiep0902/macos-system-info/releases/latest/download/latest.json
+```
+
+The first command must end with `HTTP/2 200` after the redirect, and the JSON must name the new
+version and both platforms. Then, on a Mac with the previous version installed in `/Applications`,
+"Kiểm tra cập nhật" must offer the new version and "Cập nhật" must install it.
+
+9. Close the terminal (or `unset TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD`).
+
 ## Installing and opening an un-notarized build
 
 1. Pick the DMG for your Mac: `Pulsebar_0.2.0_aarch64.dmg` for Apple Silicon, `Pulsebar_0.2.0_x64.dmg`
@@ -767,7 +942,7 @@ is expected until the build is signed with Developer ID and notarized.
    source). Do not use the x64 DMG on Apple Silicon (Rosetta disables power, frequency and
    temperature).
 2. Open the DMG and copy `Pulsebar.app` to `/Applications`. Run it from there, not from the DMG
-   (launch at login only works from a writable location).
+   (launch at login and in-app updates only work from a writable location).
 3. Open it once despite the missing notarization. This applies to a downloaded build, which macOS
    marks with the quarantine attribute; a build you made yourself is not quarantined. Not verified
    on the dev host (no quarantined download was tested):
@@ -802,11 +977,20 @@ chạy thử không đăng ký được" (A development build cannot be register
 | `requiresApproval` | switch on, hint "Cần cho phép Pulsebar trong Cài đặt hệ thống › Mục đăng nhập" (Allow Pulsebar in System Settings › Login Items) and the button "Mở Cài đặt hệ thống" (Open System Settings) |
 | `blocked`          | switch disabled, with the reason as its hint                                                                                                                                                 |
 
-Ad-hoc signing caveat (measured): an ad-hoc signature ties the registration to the code hash. After
-you update or rebuild an ad-hoc build, the old "Pulsebar.app" entry stays in Login Items and the
-new build reports the option as off. To fix it, open System Settings › General › Login Items,
-select the old "Pulsebar.app", click "−", then turn the option on again in Pulsebar. A Developer ID
-signature should keep the identity across updates (not verified).
+Ad-hoc signing caveat (measured): an ad-hoc signature ties the registration to the code hash, and
+every ad-hoc build has a new one.
+
+- After an in-app update ([Updates](#updates)), Pulsebar registers the login item again by itself
+  when the option was on before the update, and macOS shows its "Background Items Added"
+  notification again. The old "Pulsebar.app" entry stays in Login Items next to the new one (seen
+  in testing: two entries after updates). Pulsebar still starts only once at login. To tidy the
+  list, remove both entries with "−" and turn the option on again in Pulsebar.
+- After you replace or rebuild an ad-hoc build by hand (a DMG, `pnpm build:*`), the old
+  "Pulsebar.app" entry stays in Login Items and the new build reports the option as off. To fix it,
+  open System Settings › General › Login Items, select the old "Pulsebar.app", click "−", then turn
+  the option on again in Pulsebar.
+
+A Developer ID signature should keep the identity across updates (not verified).
 
 Development builds made before the switch to `SMAppService` (they used `tauri-plugin-autostart`)
 may have written `~/Library/LaunchAgents/Pulsebar.plist` (label `Pulsebar`, pointing to the old
@@ -822,19 +1006,112 @@ recorded). Not verified yet: turning the option on from a copy in `/Applications
 unit-tested; the DMG block was checked on the dev host), Apple Silicon, macOS 15 / 26 / 27,
 Developer ID builds.
 
+## Updates
+
+Pulsebar can check GitHub Releases for a newer version and install it in place, but it only
+downloads and installs when you click "Cập nhật" (Update). Releases after v0.2.0 include the
+updater; v0.1.0 and v0.2.0 do not, so install a newer release from its DMG once
+([Download](#download)).
+
+Where to check:
+
+- **Settings**: "Cài đặt" › "Cập nhật" (Settings › Updates, above "Hệ thống") shows "Phiên bản x.y.z"
+  (the installed version), the status line, the button "Kiểm tra cập nhật" (Check for updates),
+  "Lần kiểm tra gần nhất: …" (Last check: …) and the switch "Tự động kiểm tra cập nhật" (Check for
+  updates automatically).
+- **Right-click menu**: "Kiểm tra cập nhật…" opens the settings and starts a check. When a check has
+  found an update the item reads "Cập nhật lên x.y.z…" (Update to x.y.z…) and opens the popover on
+  the update banner. While a check, download or install runs, the item shows "Đang kiểm tra cập
+  nhật…", "Đang tải bản cập nhật…" or "Đang cài bản cập nhật…" and is disabled.
+
+Automatic check (on by default):
+
+- Never within the first 60 s after launch. After that, a check runs when no check has succeeded in
+  the last 24 h: on the first launch, or a launch after a day or more without a check, that is about
+  60 s after start; otherwise 24 h after the last successful check.
+- The schedule uses the wall clock and the updater thread wakes at least once an hour, so after a
+  long sleep the check runs within an hour of waking. A last-check time more than 1 h in the future
+  (the clock was moved back) counts as due.
+- A failed check is retried after 1 h at the earliest.
+- It only checks: it never downloads a package. Turning the switch off stops every automatic
+  request; the button still works.
+
+Installing an update:
+
+1. When a newer version is found, the overview shows a banner "Có bản mới x.y.z" (Version x.y.z is
+   available) with the release notes as plain text (control, bidirectional and zero-width
+   characters removed, at most 2,000 characters; long notes fold behind "Xem ghi chú", Show notes)
+   and the button "Cập nhật". Settings › Cập nhật shows the same version, notes and button.
+2. "Cập nhật" downloads the package for your architecture with a progress bar ("x / y MB"). The
+   download uses https only, with a 10 s connect timeout, a 30 s read timeout, 600 s in total and a
+   64 MiB limit (checked against `Content-Length` before reading and on every chunk).
+3. The package's minisign signature is checked against the public key built into the app,
+   including the version it was signed for. A package with a wrong signature, a signature of another
+   version, or a manifest that is not newer than the installed version is refused and nothing is
+   changed (a replayed older `latest.json` reports "Bạn đang dùng bản mới nhất", up to date).
+4. "Đang cài bản cập nhật…" (Installing): the new `Pulsebar.app` replaces the old one in the same
+   folder, then Pulsebar relaunches. The new bundle has no quarantine attribute, and no Gatekeeper
+   or App Management dialog appeared in the test with the bundle under `~/Applications`.
+5. After the relaunch the popover shows "Đã cập nhật lên x.y.z" (Updated to x.y.z) until it is
+   hidden once.
+
+If anything fails, the installed version stays as it was and Settings shows "Cập nhật không thành
+công" (Update failed) with the reason: no connection, the server took too long, invalid signature,
+an unusually large download, the install failed, or an unknown error. Check again later or install
+by hand (below).
+
+Where it fetches from: one GET of
+`https://github.com/TheHiep0902/macos-system-info/releases/latest/download/latest.json`, which GitHub
+redirects to the `latest.json` of the latest published full release; drafts and pre-releases are
+ignored. The package URL comes from that manifest and must be https.
+
+What can block an update:
+
+- **Running from the DMG, from App Translocation or outside an `.app`**: checking still works, but
+  installing is refused and Settings › Cập nhật shows "Không cập nhật được từ vị trí hiện tại của Pulsebar" (Pulsebar cannot update from
+  its current location) with the hint "Hãy chép Pulsebar vào thư mục Applications, mở lại từ đó rồi
+  cập nhật." (Copy Pulsebar to the Applications folder, open it from there, then update). Nothing is
+  downloaded.
+- **A folder you cannot write to**: macOS may ask for an administrator password while installing
+  (the app shows "macOS có thể hỏi mật khẩu quản trị viên để hoàn tất."). Cancelling the dialog
+  leaves the installed version as it was. Not verified: in testing a folder without write
+  permission (`chmod 555`) did not trigger the dialog, because the update only renames the app
+  inside that folder; the dialog needs an app owned by another user, such as `root`. Updating a
+  copy in `/Applications` worked without any dialog, including App Management.
+
+Launch at login after an update: ad-hoc builds get a new code identity with every version, which
+invalidates the login item. If "Khởi động cùng macOS" was on before the
+update, the new version registers it again automatically on its first start, and macOS shows the
+"Background Items Added" notification again after each update. If macOS needs your approval, the
+"updated" notice says so and offers "Mở Cài đặt hệ thống"; if registering fails, it asks you to turn
+the option on again in the settings. A duplicate "Pulsebar.app" entry may remain in System Settings ›
+General › Login Items; Pulsebar still starts only once. See [Launch at login](#launch-at-login).
+
+Data and privacy: a check is one small HTTPS request (the manifest is about 1–2 KB with short notes;
+measured 1,238 B on a local test server), plus the redirect and the TLS handshake; the total on the
+real GitHub endpoint is not measured yet. An update downloads one package of a few MB. Pulsebar sends
+nothing except the HTTP requests themselves: no identifier, no usage data, no settings. The last
+check time is stored only locally in `updater-state.json`.
+
+If the updater fails or a release breaks it, download the DMG for your Mac from the
+[Releases page](https://github.com/TheHiep0902/macos-system-info/releases), quit Pulsebar
+(right-click › "Thoát"), and replace `Pulsebar.app` in `/Applications` with the one from the DMG
+([Installing and opening an un-notarized build](#installing-and-opening-an-un-notarized-build)).
+Your settings are kept.
+
 ## Logs
 
 Pulsebar logs through `env_logger` to standard error. The default level is `warn`, and messages are
 written only when a state changes (a backend comes up or goes down, a metric becomes Unavailable,
 the sampler restarts), never on every tick at the default level:
 
-| Level   | Examples                                                                 |
-| ------- | ------------------------------------------------------------------------ |
-| `error` | the sampler thread crashed (restarted with a backoff) or could not start |
-| `warn`  | a metric or backend is unavailable, invalid settings were replaced       |
-| `info`  | backend selection, a metric is available again, sleep/wake gaps          |
-| `debug` | popover shown or hidden, `SMAppService` call durations                   |
-| `trace` | every menu bar title change                                              |
+| Level   | Examples                                                                                                                                             |
+| ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `error` | the sampler thread crashed (restarted with a backoff) or could not start                                                                             |
+| `warn`  | a metric or backend is unavailable, invalid settings were replaced; an update check, download or install failed (`update Check failed (Network): …`) |
+| `info`  | backend selection, a metric is available again, sleep/wake gaps, `update installed; restarting`                                                      |
+| `debug` | popover shown or hidden, `SMAppService` call durations                                                                                               |
+| `trace` | every menu bar title change                                                                                                                          |
 
 To see the logs of an installed build, quit the running instance first (right-click › "Thoát",
 Quit), because a second launch hands over to the running instance and exits. Then run:
@@ -902,9 +1179,16 @@ samples at a different instant. On the dev host, the 30 s window mean matched `p
 
 **Can it show Fahrenheit?** No. Temperatures are shown in °C only; there is no unit setting.
 
+**Does Pulsebar update itself without asking?** No. The automatic check (on by default, once a day)
+only looks for a newer version and shows it; nothing is downloaded or installed until you click
+"Cập nhật" (Update). Turn the check off in Settings › Cập nhật. See [Updates](#updates).
+
+**What does the update check send?** Only the HTTPS request for `latest.json` (about 1–2 KB in
+reply): no identifier, usage data or settings.
+
 ## Known issues
 
-Both were found during on-screen checks and are planned for a separate fix branch.
+F1 and F2 were found during on-screen checks and are planned for a separate fix branch.
 
 - **F1 (low)**: with "Tiết kiệm bộ nhớ" (Memory saver) on, the released popover window stays
   registered in the WindowServer, so one window is kept per memory-saver cycle (main footprint
@@ -912,6 +1196,14 @@ Both were found during on-screen checks and are planned for a separate fix branc
 - **F2 (cosmetic)**: on the first render of the settings view, the "Thanh menu" (Menu bar) and
   "Giao diện" (Appearance) cards can get about 22–26 px of extra space at the bottom. Any re-layout,
   such as toggling a switch, removes it. It was not seen again in the D4 run, but it stays open.
+- **Updater, login item (ad-hoc builds)**: each update gives the app a new code identity, so
+  Pulsebar registers the login item again after the update and macOS shows the "Background Items
+  Added" notification again after every update; a duplicate "Pulsebar.app" entry remains in Login
+  Items (see [Launch at login](#launch-at-login)), though the app starts only once at login. A Developer ID signature should avoid it (not
+  verified).
+- **Updater, not verified**: the administrator-password path (an app owned by another user), Apple Silicon,
+  macOS 15 and 26, and the real GitHub endpoint (only a local test server was used, see
+  [docs/verification.md](docs/verification.md)).
 
 ## Third-party notices
 

@@ -22,7 +22,10 @@
     "tauri": "tauri",
     "build:arm64": "CI=true tauri build --target aarch64-apple-darwin --bundles app,dmg",
     "build:x64": "CI=true tauri build --target x86_64-apple-darwin --bundles app,dmg",
-    "build:universal": "CI=true tauri build --target universal-apple-darwin --bundles app,dmg"
+    "build:universal": "CI=true tauri build --target universal-apple-darwin --bundles app,dmg",
+    "release:arm64": "CI=true tauri build --target aarch64-apple-darwin --bundles app,dmg --config src-tauri/tauri.release.conf.json",
+    "release:x64": "CI=true tauri build --target x86_64-apple-darwin --bundles app,dmg --config src-tauri/tauri.release.conf.json",
+    "release:assets": "node scripts/release-assets.mjs"
   },
   "dependencies": {
     "@lucide/svelte": "^1.56.0",

@@ -15,6 +15,7 @@ use crate::popover;
 use crate::sampler::SharedState;
 use crate::tray::{self, TitleMetrics};
 use crate::tray_image;
+use crate::updater;
 
 pub const SETTINGS_FILE: &str = "settings.json";
 pub const MAX_SETTINGS_BYTES: u64 = 64 * 1024;
@@ -48,6 +49,7 @@ pub struct Settings {
     pub reduce_effects: bool,
     pub show_network_disks: bool,
     pub memory_saver: bool,
+    pub auto_check_updates: bool,
 }
 
 impl Default for Settings {
@@ -60,6 +62,7 @@ impl Default for Settings {
             reduce_effects: false,
             show_network_disks: false,
             memory_saver: false,
+            auto_check_updates: true,
         }
     }
 }
@@ -138,6 +141,8 @@ pub fn parse_settings(text: &str) -> Parsed {
         show_network_disks: field(&object, "showNetworkDisks", &mut repaired)
             .unwrap_or(defaults.show_network_disks),
         memory_saver: field(&object, "memorySaver", &mut repaired).unwrap_or(defaults.memory_saver),
+        auto_check_updates: field(&object, "autoCheckUpdates", &mut repaired)
+            .unwrap_or(defaults.auto_check_updates),
     }
     .normalized();
     Parsed { settings, repaired }
@@ -269,6 +274,9 @@ pub fn apply<R: Runtime>(app: &AppHandle<R>, previous: &Settings, next: &Setting
     if previous.memory_saver != next.memory_saver {
         popover::memory_saver_changed(app, next.memory_saver);
     }
+    if previous.auto_check_updates != next.auto_check_updates {
+        updater::settings_changed(app, next.auto_check_updates);
+    }
 }
 
 pub fn launch_at_login() -> LaunchState {
@@ -352,6 +360,7 @@ mod tests {
             reduce_effects: true,
             show_network_disks: true,
             memory_saver: true,
+            auto_check_updates: false,
         }
     }
 
@@ -457,6 +466,31 @@ mod tests {
         assert!(!parsed.repaired);
         assert_eq!(parsed.settings.title_metrics, TitleMetrics::default());
         assert_eq!(parsed.settings.title_format, TitleFormatSetting::Compact);
+    }
+
+    #[test]
+    fn legacy_file_without_auto_check_updates_enables_it_without_repair() {
+        let parsed = parse_settings(
+            r#"{"titleFormat":"default","showTrayIcon":true,"titleMetrics":{"cpu":true,"power":true,"memory":true,"temperature":false,"network":false},"theme":"system","reduceEffects":false,"showNetworkDisks":false,"memorySaver":false}"#,
+        );
+        assert!(!parsed.repaired);
+        assert!(parsed.settings.auto_check_updates);
+        let disabled = parse_settings(r#"{"autoCheckUpdates":false}"#);
+        assert!(!disabled.repaired);
+        assert!(!disabled.settings.auto_check_updates);
+        let invalid = parse_settings(r#"{"autoCheckUpdates":"off"}"#);
+        assert!(invalid.repaired);
+        assert!(invalid.settings.auto_check_updates);
+    }
+
+    #[test]
+    fn payload_without_auto_check_updates_is_rejected() {
+        let mut value = fixture("settings");
+        value
+            .as_object_mut()
+            .expect("payload object")
+            .remove("autoCheckUpdates");
+        assert!(serde_json::from_value::<SettingsPayload>(value).is_err());
     }
 
     #[test]

@@ -2,19 +2,23 @@ use objc2::MainThreadMarker;
 use objc2_app_kit::{NSFont, NSFontWeightRegular};
 use serde::{Deserialize, Serialize};
 use tauri::image::Image;
-use tauri::menu::{CheckMenuItem, CheckMenuItemBuilder, MenuBuilder, MenuEvent, MenuItemBuilder};
+use tauri::menu::{
+    CheckMenuItem, CheckMenuItemBuilder, MenuBuilder, MenuEvent, MenuItem, MenuItemBuilder,
+};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, Runtime};
 
 use crate::login_item::LaunchAtLoginStatus;
 use crate::model::{MetricState, PowerSample, TemperatureSample, ThroughputSample};
 use crate::popover::{self, Anchor, RequestedView};
+use crate::updater::{self, UpdatePhase};
 
 pub const TRAY_ID: &str = "main";
 pub const INITIAL_TITLE: &str = "CPU –% · –W · RAM –%";
 pub const MENU_OPEN: &str = "open";
 pub const MENU_LAUNCH_AT_LOGIN: &str = "launch-at-login";
 pub const MENU_SETTINGS: &str = "settings";
+pub const MENU_UPDATE: &str = "update";
 pub const MENU_QUIT: &str = "quit";
 
 pub(crate) const TRAY_ICON: &[u8] = include_bytes!("../icons/tray-template@2x.png");
@@ -179,6 +183,20 @@ pub fn format_rate_lines(sample: &MetricState<ThroughputSample>) -> [String; 2] 
 
 pub struct TrayMenu<R: Runtime> {
     launch_at_login: CheckMenuItem<R>,
+    update: MenuItem<R>,
+}
+
+pub fn update_item_label(phase: &UpdatePhase) -> (String, bool) {
+    match phase {
+        UpdatePhase::Available { version, .. } => (format!("Cập nhật lên {version}…"), true),
+        UpdatePhase::Checking => ("Đang kiểm tra cập nhật…".to_owned(), false),
+        UpdatePhase::Downloading { .. } => ("Đang tải bản cập nhật…".to_owned(), false),
+        UpdatePhase::Installing => ("Đang cài bản cập nhật…".to_owned(), false),
+        UpdatePhase::Idle
+        | UpdatePhase::UpToDate
+        | UpdatePhase::Failed { .. }
+        | UpdatePhase::Blocked { .. } => ("Kiểm tra cập nhật…".to_owned(), true),
+    }
 }
 
 fn handle_menu<R: Runtime>(app: &AppHandle<R>, event: &MenuEvent) {
@@ -189,6 +207,14 @@ fn handle_menu<R: Runtime>(app: &AppHandle<R>, event: &MenuEvent) {
             let target = !crate::settings::launch_at_login().status.is_on();
             crate::settings::set_launch_at_login(app, target);
             popover::refresh_if_visible(app);
+        }
+        MENU_UPDATE => {
+            if updater::is_update_available(app) {
+                popover::show(app, Anchor::Tray, Some(RequestedView::Overview));
+            } else {
+                popover::show(app, Anchor::Tray, Some(RequestedView::Settings));
+                updater::check_now(app);
+            }
         }
         MENU_QUIT => app.exit(0),
         _ => {}
@@ -216,10 +242,15 @@ pub fn create<R: Runtime>(
         .checked(launch_at_login.is_on())
         .enabled(launch_at_login != LaunchAtLoginStatus::Blocked)
         .build(app)?;
+    let (update_label, update_enabled) = update_item_label(&UpdatePhase::Idle);
+    let update_item = MenuItemBuilder::with_id(MENU_UPDATE, update_label)
+        .enabled(update_enabled)
+        .build(app)?;
     let menu = MenuBuilder::new(app)
         .item(&MenuItemBuilder::with_id(MENU_OPEN, "Mở Pulsebar").build(app)?)
         .item(&launch_item)
         .item(&MenuItemBuilder::with_id(MENU_SETTINGS, "Cài đặt…").build(app)?)
+        .item(&update_item)
         .separator()
         .item(&MenuItemBuilder::with_id(MENU_QUIT, "Thoát").build(app)?)
         .build()?;
@@ -242,6 +273,7 @@ pub fn create<R: Runtime>(
         tray,
         TrayMenu {
             launch_at_login: launch_item,
+            update: update_item,
         },
     ))
 }
@@ -268,6 +300,20 @@ pub fn sync_launch_at_login<R: Runtime>(app: &AppHandle<R>, status: LaunchAtLogi
         });
     if let Err(err) = result {
         log::warn!("could not update the launch-at-login menu item: {err}");
+    }
+}
+
+pub fn sync_update_item<R: Runtime>(app: &AppHandle<R>, phase: &UpdatePhase) {
+    let Some(menu) = app.try_state::<TrayMenu<R>>() else {
+        return;
+    };
+    let (text, enabled) = update_item_label(phase);
+    let result = menu
+        .update
+        .set_text(text)
+        .and_then(|()| menu.update.set_enabled(enabled));
+    if let Err(err) = result {
+        log::warn!("could not update the update menu item: {err}");
     }
 }
 
@@ -548,6 +594,46 @@ mod tests {
         assert_eq!(
             format_rate_lines(&rate(f64::NAN, 0.0)),
             ["↑ 0.0".to_owned(), "↓ –".to_owned()]
+        );
+    }
+
+    #[test]
+    fn update_item_label_follows_the_phase() {
+        let idle = ("Kiểm tra cập nhật…".to_owned(), true);
+        assert_eq!(update_item_label(&UpdatePhase::Idle), idle);
+        assert_eq!(update_item_label(&UpdatePhase::UpToDate), idle);
+        assert_eq!(
+            update_item_label(&UpdatePhase::Failed {
+                error: updater::UpdateError::Network
+            }),
+            idle
+        );
+        assert_eq!(
+            update_item_label(&UpdatePhase::Blocked { reason: "x".into() }),
+            idle
+        );
+        assert_eq!(
+            update_item_label(&UpdatePhase::Available {
+                version: "0.3.1".into(),
+                notes: String::new(),
+                date: None
+            }),
+            ("Cập nhật lên 0.3.1…".to_owned(), true)
+        );
+        assert_eq!(
+            update_item_label(&UpdatePhase::Checking),
+            ("Đang kiểm tra cập nhật…".to_owned(), false)
+        );
+        assert_eq!(
+            update_item_label(&UpdatePhase::Downloading {
+                received: 1,
+                total: None
+            }),
+            ("Đang tải bản cập nhật…".to_owned(), false)
+        );
+        assert_eq!(
+            update_item_label(&UpdatePhase::Installing),
+            ("Đang cài bản cập nhật…".to_owned(), false)
         );
     }
 

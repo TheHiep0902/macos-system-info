@@ -10,7 +10,9 @@ import type {
   StaticInfo,
   TemperatureSample,
   ThroughputSample,
+  UpdateState,
 } from '../lib/types';
+import updateJson from './contract-update.json';
 import appleSnapshotJson from './snapshot-apple-silicon.json';
 import appleStaticJson from './static-apple-silicon.json';
 import intelSnapshotJson from './snapshot-intel.json';
@@ -27,9 +29,13 @@ export interface MockScenario {
   loading: boolean;
   rosetta: boolean;
   login: LoginScenario | null;
+  update: UpdateScenario;
 }
 
 export type LoginScenario = 'requiresApproval' | 'blocked';
+
+export type UpdateScenario =
+  'idle' | 'uptodate' | 'available' | 'downloading' | 'installing' | 'failed' | 'blocked' | 'post';
 
 export type ThroughputScenario = 'ok' | 'unavailable' | 'loading';
 
@@ -52,6 +58,32 @@ const THROUGHPUT_SCENARIOS: readonly ThroughputScenario[] = ['ok', 'unavailable'
 const ROSETTA_REASON = 'Đang chạy qua Rosetta – hãy mở bản native';
 const VIEWS: readonly PopoverView[] = ['overview', 'cpu-detail', 'settings'];
 const LOGIN_SCENARIOS: readonly LoginScenario[] = ['requiresApproval', 'blocked'];
+const UPDATE_SCENARIOS: readonly UpdateScenario[] = [
+  'idle',
+  'uptodate',
+  'available',
+  'downloading',
+  'installing',
+  'failed',
+  'blocked',
+  'post',
+];
+const UPDATE_FIXTURES = updateJson as unknown as Record<string, UpdateState>;
+const UPDATE_SEEDS: Record<UpdateScenario, string> = {
+  idle: 'idle',
+  uptodate: 'upToDate',
+  available: 'available',
+  downloading: 'downloading',
+  installing: 'installing',
+  failed: 'failed',
+  blocked: 'blocked',
+  post: 'postUpdate',
+};
+export const UPDATE_CHECK_MS = 1200;
+export const UPDATE_TICK_MS = 400;
+export const UPDATE_TOTAL_BYTES = 2_621_440;
+const UPDATE_CHUNK_BYTES = 524_288;
+const BUSY_PHASES: readonly string[] = ['checking', 'downloading', 'installing'];
 const LOGIN_BLOCKED_REASON = 'Hãy chép Pulsebar vào thư mục Applications rồi bật lại';
 
 const DEFAULT_SETTINGS: Settings = {
@@ -62,6 +94,7 @@ const DEFAULT_SETTINGS: Settings = {
   reduceEffects: false,
   showNetworkDisks: false,
   memorySaver: false,
+  autoCheckUpdates: true,
   launchAtLogin: false,
   launchAtLoginStatus: 'disabled',
   launchAtLoginReason: null,
@@ -83,6 +116,7 @@ export function parseScenario(params: URLSearchParams): MockScenario {
     loading: params.get('state') === 'loading',
     rosetta: params.get('rosetta') === 'on',
     login: pick(params.get('login'), LOGIN_SCENARIOS),
+    update: pick(params.get('update'), UPDATE_SCENARIOS) ?? 'idle',
   };
 }
 
@@ -102,6 +136,14 @@ function launchAtLoginFields(login: LoginScenario | null, requested: boolean): L
     launchAtLoginStatus: login === 'requiresApproval' ? 'requiresApproval' : 'enabled',
     launchAtLoginReason: null,
   };
+}
+
+function seedUpdate(scenario: UpdateScenario): UpdateState {
+  const seed = UPDATE_FIXTURES[UPDATE_SEEDS[scenario]];
+  if (seed === undefined) {
+    throw new Error(`mock: missing update fixture for ${scenario}`);
+  }
+  return structuredClone(seed);
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -131,6 +173,7 @@ class MockBackend {
   #detail = false;
   #seeded = false;
   #timer: ReturnType<typeof setTimeout> | null = null;
+  #update: UpdateState;
 
   constructor(scenario: MockScenario) {
     this.#scenario = scenario;
@@ -147,6 +190,7 @@ class MockBackend {
       snapshot.temperature.state === 'ok' ? snapshot.temperature.celsius : null;
     this.#throughputBase = snapshot.throughput.state === 'ok' ? snapshot.throughput : null;
     this.#current = this.#decorate(snapshot);
+    this.#update = { ...seedUpdate(scenario.update), autoCheck: this.#settings.autoCheckUpdates };
   }
 
   readonly transport: Transport = {
@@ -190,6 +234,12 @@ class MockBackend {
         return null;
       case COMMANDS.openLoginItemsSettings:
         return undefined;
+      case COMMANDS.getUpdateState:
+        return structuredClone(this.#update);
+      case COMMANDS.checkForUpdates:
+        return this.#checkForUpdates();
+      case COMMANDS.installUpdate:
+        return this.#installUpdate();
       default:
         throw new Error(`mock: unknown command ${command}`);
     }
@@ -221,7 +271,64 @@ class MockBackend {
     if (disksChanged) {
       this.#emit(EVENTS.disksChanged, null);
     }
+    if (next.autoCheckUpdates !== this.#update.autoCheck) {
+      this.#setUpdate({ ...this.#update, autoCheck: next.autoCheckUpdates });
+    }
     return { ...next };
+  }
+
+  #setUpdate(next: UpdateState): void {
+    this.#update = next;
+    this.#emit(EVENTS.updaterState, structuredClone(next));
+  }
+
+  #checkForUpdates(): UpdateState {
+    if (BUSY_PHASES.includes(this.#update.phase.kind)) {
+      return structuredClone(this.#update);
+    }
+    this.#setUpdate({ ...this.#update, phase: { kind: 'checking' } });
+    setTimeout(() => {
+      const found = seedUpdate('available').phase;
+      this.#setUpdate({
+        ...this.#update,
+        lastCheckAt: Date.now(),
+        phase: this.#scenario.update === 'uptodate' ? { kind: 'upToDate' } : found,
+      });
+    }, UPDATE_CHECK_MS);
+    return structuredClone(this.#update);
+  }
+
+  #installUpdate(): UpdateState {
+    if (this.#update.phase.kind !== 'available') {
+      return structuredClone(this.#update);
+    }
+    this.#setUpdate({
+      ...this.#update,
+      phase: { kind: 'downloading', received: 0, total: UPDATE_TOTAL_BYTES },
+    });
+    this.#downloadTick(0);
+    return structuredClone(this.#update);
+  }
+
+  #downloadTick(received: number): void {
+    setTimeout(() => {
+      const next = Math.min(UPDATE_TOTAL_BYTES, received + UPDATE_CHUNK_BYTES);
+      if (next < UPDATE_TOTAL_BYTES) {
+        this.#setUpdate({
+          ...this.#update,
+          phase: { kind: 'downloading', received: next, total: UPDATE_TOTAL_BYTES },
+        });
+        this.#downloadTick(next);
+        return;
+      }
+      this.#setUpdate({
+        ...this.#update,
+        phase:
+          this.#scenario.update === 'failed'
+            ? { kind: 'failed', error: 'signature' }
+            : { kind: 'installing' },
+      });
+    }, UPDATE_TICK_MS);
   }
 
   #seedHistory(): void {
@@ -255,7 +362,7 @@ class MockBackend {
     }
   }
 
-  #emit(event: string, payload: Snapshot | PopoverVisibility | null): void {
+  #emit(event: string, payload: Snapshot | PopoverVisibility | UpdateState | null): void {
     for (const handler of this.#handlers.get(event) ?? []) {
       handler(payload);
     }

@@ -8,6 +8,9 @@ const APP_COMMANDS: &[&str] = &[
     "resize_popover",
     "quit_app",
     "open_login_items_settings",
+    "get_update_state",
+    "check_for_updates",
+    "install_update",
 ];
 
 fn main() {

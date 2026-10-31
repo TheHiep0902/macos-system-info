@@ -134,6 +134,47 @@ export const messages = {
   'settings.saving': 'Đang lưu…',
   'settings.saveError': 'Không lưu được cài đặt, đã khôi phục giá trị trước.',
   'settings.loadError': 'Không tải được cài đặt.',
+  'update.section': 'Cập nhật',
+  'update.currentVersion': 'Phiên bản {version}',
+  'update.check': 'Kiểm tra cập nhật',
+  'update.install': 'Cập nhật',
+  'update.autoCheck': 'Tự động kiểm tra cập nhật',
+  'update.autoCheckHint': 'Mỗi ngày kiểm tra một lần. Pulsebar chỉ tải khi bạn bấm Cập nhật.',
+  'update.status.checking': 'Đang kiểm tra cập nhật…',
+  'update.status.upToDate': 'Bạn đang dùng bản mới nhất',
+  'update.status.available': 'Có bản mới {version}',
+  'update.status.downloading': 'Đang tải bản cập nhật…',
+  'update.status.installing': 'Đang cài bản cập nhật…',
+  'update.status.failed': 'Cập nhật không thành công',
+  'update.status.blocked': 'Không cập nhật được từ vị trí hiện tại của Pulsebar',
+  'update.blockedHint': 'Hãy chép Pulsebar vào thư mục Applications, mở lại từ đó rồi cập nhật.',
+  'update.progressLabel': 'Tiến độ tải bản cập nhật',
+  'update.progress': '{received} / {total} MB',
+  'update.progressUnknown': 'Đã tải {received} MB',
+  'update.installingHint': 'macOS có thể hỏi mật khẩu quản trị viên để hoàn tất.',
+  'update.error.network':
+    'Không kết nối được máy chủ cập nhật. Hãy kiểm tra kết nối mạng rồi thử lại.',
+  'update.error.timeout':
+    'Máy chủ cập nhật phản hồi quá lâu. Hãy kiểm tra kết nối mạng rồi thử lại.',
+  'update.error.signature':
+    'Bản tải về không có chữ ký hợp lệ nên Pulsebar không cài. Bản hiện tại vẫn giữ nguyên.',
+  'update.error.tooLarge':
+    'Bản tải về lớn bất thường nên Pulsebar đã dừng tải. Bản hiện tại vẫn giữ nguyên.',
+  'update.error.install': 'Không cài được bản cập nhật. Bản hiện tại vẫn giữ nguyên.',
+  'update.error.unknown': 'Đã có lỗi khi cập nhật. Hãy thử lại sau.',
+  'update.lastCheck': 'Lần kiểm tra gần nhất: {when}',
+  'update.lastCheck.never': 'Chưa kiểm tra lần nào',
+  'update.lastCheck.justNow': 'vừa xong',
+  'update.lastCheck.minutes': '{count} phút trước',
+  'update.lastCheck.hours': '{count} giờ trước',
+  'update.notes': 'Ghi chú phát hành',
+  'update.notes.show': 'Xem ghi chú',
+  'update.notes.hide': 'Thu gọn ghi chú',
+  'update.post.title': 'Đã cập nhật lên {version}',
+  'update.post.loginApproval':
+    'Hãy cho phép lại Pulsebar trong Cài đặt hệ thống › Mục đăng nhập để tiếp tục khởi động cùng macOS.',
+  'update.post.loginFailed':
+    'Không bật lại được khởi động cùng macOS. Hãy bật lại trong Cài đặt của Pulsebar.',
 } as const;
 
 type Messages = typeof messages;

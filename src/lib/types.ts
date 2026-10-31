@@ -148,6 +148,7 @@ export interface Settings {
   reduceEffects: boolean;
   showNetworkDisks: boolean;
   memorySaver: boolean;
+  autoCheckUpdates: boolean;
   launchAtLogin: boolean;
   launchAtLoginStatus: LaunchAtLoginStatus;
   launchAtLoginReason: string | null;
@@ -160,4 +161,31 @@ export type RequestedView = 'overview' | 'settings';
 export interface PopoverVisibility {
   visible: boolean;
   view: RequestedView | null;
+}
+
+export type UpdateError = 'network' | 'timeout' | 'signature' | 'tooLarge' | 'install' | 'unknown';
+
+export type UpdatePhase =
+  | { kind: 'idle' }
+  | { kind: 'checking' }
+  | { kind: 'upToDate' }
+  | { kind: 'available'; version: string; notes: string; date: number | null }
+  | { kind: 'downloading'; received: number; total: number | null }
+  | { kind: 'installing' }
+  | { kind: 'failed'; error: UpdateError }
+  | { kind: 'blocked'; reason: string };
+
+export type LoginItemOutcome = 'unchanged' | 'reRegistered' | 'requiresApproval' | 'failed';
+
+export interface PostUpdate {
+  fromVersion: string;
+  loginItem: LoginItemOutcome;
+}
+
+export interface UpdateState {
+  currentVersion: string;
+  autoCheck: boolean;
+  lastCheckAt: number | null;
+  phase: UpdatePhase;
+  postUpdate: PostUpdate | null;
 }

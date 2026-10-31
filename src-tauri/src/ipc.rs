@@ -10,11 +10,13 @@ use crate::sampler::{SharedState, Sink};
 use crate::settings::{self, SettingsPayload, SettingsStore};
 use crate::tray::{self, TRAY_ID};
 use crate::tray_image;
+use crate::updater::{self, UpdateState, UpdaterState};
 
 pub const POPOVER_LABEL: &str = "popover";
 pub const EVENT_SNAPSHOT: &str = "metrics://snapshot";
 pub const EVENT_DISKS_CHANGED: &str = "disks://changed";
 pub const EVENT_POPOVER_VISIBILITY: &str = "popover://visibility";
+pub const EVENT_UPDATE_STATE: &str = "updater://state";
 
 const SETTINGS_SAVE_FAILED: &str = "settings could not be saved";
 
@@ -65,6 +67,27 @@ pub fn set_settings<R: Runtime>(
 #[tauri::command]
 pub fn open_login_items_settings() {
     login_item::open_system_settings();
+}
+
+#[tauri::command]
+pub fn get_update_state(state: State<'_, UpdaterState>) -> UpdateState {
+    state.snapshot()
+}
+
+#[tauri::command]
+pub fn check_for_updates<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, UpdaterState>,
+) -> UpdateState {
+    updater::request_check(&app, &state)
+}
+
+#[tauri::command]
+pub fn install_update<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, UpdaterState>,
+) -> UpdateState {
+    updater::request_install(&app, &state)
 }
 
 #[tauri::command]

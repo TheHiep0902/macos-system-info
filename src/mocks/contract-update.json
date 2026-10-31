@@ -1,0 +1,89 @@
+{
+  "idle": {
+    "currentVersion": "0.3.0",
+    "autoCheck": true,
+    "lastCheckAt": null,
+    "phase": { "kind": "idle" },
+    "postUpdate": null
+  },
+  "checking": {
+    "currentVersion": "0.3.0",
+    "autoCheck": false,
+    "lastCheckAt": 1793437323000,
+    "phase": { "kind": "checking" },
+    "postUpdate": null
+  },
+  "upToDate": {
+    "currentVersion": "0.3.0",
+    "autoCheck": true,
+    "lastCheckAt": 1793437323000,
+    "phase": { "kind": "upToDate" },
+    "postUpdate": null
+  },
+  "available": {
+    "currentVersion": "0.3.0",
+    "autoCheck": true,
+    "lastCheckAt": 1793437323000,
+    "phase": {
+      "kind": "available",
+      "version": "0.3.1",
+      "notes": "Sửa lỗi hiển thị nhiệt độ.\nCải thiện tốc độ mở popover.",
+      "date": 1793430000000
+    },
+    "postUpdate": null
+  },
+  "availableNoDate": {
+    "currentVersion": "0.3.0",
+    "autoCheck": true,
+    "lastCheckAt": 1793437323000,
+    "phase": { "kind": "available", "version": "0.4.0", "notes": "", "date": null },
+    "postUpdate": null
+  },
+  "downloading": {
+    "currentVersion": "0.3.0",
+    "autoCheck": true,
+    "lastCheckAt": 1793437323000,
+    "phase": { "kind": "downloading", "received": 1048576, "total": 2621440 },
+    "postUpdate": null
+  },
+  "downloadingUnknownTotal": {
+    "currentVersion": "0.3.0",
+    "autoCheck": true,
+    "lastCheckAt": 1793437323000,
+    "phase": { "kind": "downloading", "received": 4096, "total": null },
+    "postUpdate": null
+  },
+  "installing": {
+    "currentVersion": "0.3.0",
+    "autoCheck": true,
+    "lastCheckAt": 1793437323000,
+    "phase": { "kind": "installing" },
+    "postUpdate": null
+  },
+  "failed": {
+    "currentVersion": "0.3.0",
+    "autoCheck": true,
+    "lastCheckAt": 1793437323000,
+    "phase": { "kind": "failed", "error": "signature" },
+    "postUpdate": null
+  },
+  "blocked": {
+    "currentVersion": "0.3.0",
+    "autoCheck": true,
+    "lastCheckAt": null,
+    "phase": {
+      "kind": "blocked",
+      "reason": "Hãy chép Pulsebar vào thư mục Applications rồi bật lại"
+    },
+    "postUpdate": null
+  },
+  "postUpdate": {
+    "currentVersion": "0.3.1",
+    "autoCheck": true,
+    "lastCheckAt": 1793437323000,
+    "phase": { "kind": "idle" },
+    "postUpdate": { "fromVersion": "0.3.0", "loginItem": "reRegistered" }
+  },
+  "failedErrors": ["network", "timeout", "signature", "tooLarge", "install", "unknown"],
+  "loginItemOutcomes": ["unchanged", "reRegistered", "requiresApproval", "failed"]
+}

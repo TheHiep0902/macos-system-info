@@ -5,13 +5,14 @@
   import { t } from '../../lib/i18n';
   import { launchAtLoginUi } from '../../lib/launch-at-login';
   import { menuBarLocks, type TitleMetricKey } from '../../lib/title-metrics';
-  import type { Settings, ThemePreference, TitleFormat } from '../../lib/types';
+  import type { Settings, ThemePreference, TitleFormat, UpdateState } from '../../lib/types';
   import PopoverShell from '../layout/PopoverShell.svelte';
   import ViewHeader from '../layout/ViewHeader.svelte';
   import EmptyState from '../primitives/EmptyState.svelte';
   import Skeleton from '../primitives/Skeleton.svelte';
   import SettingRadioGroup from './SettingRadioGroup.svelte';
   import SettingSwitch from './SettingSwitch.svelte';
+  import UpdateSection from './UpdateSection.svelte';
 
   interface Props {
     settings: Settings | null;
@@ -24,6 +25,9 @@
     onback: () => void;
     onquit: () => void;
     onopenloginitems: () => void;
+    update: UpdateState | null;
+    oncheckupdates: () => void;
+    oninstallupdate: () => void;
   }
 
   let {
@@ -37,6 +41,9 @@
     onback,
     onquit,
     onopenloginitems,
+    update,
+    oncheckupdates,
+    oninstallupdate,
   }: Props = $props();
 
   const uid = $props.id();
@@ -134,6 +141,14 @@
         onchange={(showNetworkDisks) => onchange({ showNetworkDisks })}
       />
     </section>
+
+    <UpdateSection
+      {update}
+      autoCheck={settings.autoCheckUpdates}
+      onautocheckchange={(autoCheckUpdates) => onchange({ autoCheckUpdates })}
+      oncheck={oncheckupdates}
+      oninstall={oninstallupdate}
+    />
 
     <section class="section" aria-labelledby={`${uid}-system`}>
       <h2 class="section-title" id={`${uid}-system`}>{t('settings.system')}</h2>
