@@ -24,7 +24,8 @@ macOS 14 or later, on Apple Silicon and Intel Macs, without sudo, kernel extensi
 The UI text is Vietnamese. Labels quoted in this README are the exact UI strings, followed by an
 English gloss.
 
-Status: version 0.2.0, the first release ([Download](#download)); v0.1.0 stays a pre-release.
+Status: version 0.3.0, the first release with the in-app updater ([Download](#download)); v0.2.0
+and v0.1.0 are pre-releases.
 Builds are signed ad-hoc and not notarized (see
 [Installing and opening an un-notarized build](#installing-and-opening-an-un-notarized-build)), and
 the Apple Silicon build has not been run on a real Apple Silicon Mac yet. Detailed test results live in
@@ -87,14 +88,14 @@ Mac behaves.
 
 ## Download
 
-Releases: <https://github.com/TheHiep0902/macos-system-info/releases>. The repository is private,
-so only accounts with access can download them. The in-app updater needs the releases to be public
-(see [Releasing](#releasing)).
+Releases: <https://github.com/TheHiep0902/macos-system-info/releases>. They are public, so no account
+is needed to download them.
 
-| Release | Type             | Contents                                                             |
-| ------- | ---------------- | -------------------------------------------------------------------- |
-| v0.2.0  | release (latest) | `Pulsebar_0.2.0_aarch64.dmg`, `Pulsebar_0.2.0_x64.dmg`, `SHA256SUMS` |
-| v0.1.0  | pre-release      | `Pulsebar_0.1.0_aarch64.dmg`, `Pulsebar_0.1.0_x64.dmg`, `SHA256SUMS` |
+| Release | Type             | Contents                                                                            |
+| ------- | ---------------- | ----------------------------------------------------------------------------------- |
+| v0.3.0  | release (latest) | `Pulsebar_0.3.0_aarch64.dmg`, `Pulsebar_0.3.0_x64.dmg`, `SHA256SUMS`, updater files |
+| v0.2.0  | pre-release      | `Pulsebar_0.2.0_aarch64.dmg`, `Pulsebar_0.2.0_x64.dmg`, `SHA256SUMS`                |
+| v0.1.0  | pre-release      | `Pulsebar_0.1.0_aarch64.dmg`, `Pulsebar_0.1.0_x64.dmg`, `SHA256SUMS`                |
 
 v0.1.0 and v0.2.0 have no in-app updater: install a later release from a DMG once, and from then
 on Pulsebar can update itself ([Updates](#updates)). Releases with the updater also carry
@@ -254,18 +255,10 @@ or `/opt/local/bin/cargo`.
 
 ### 4. Get the repository
 
-`git` comes with the Command Line Tools (step 1). Over SSH (needs an SSH key with access to the
-private repository):
+`git` comes with the Command Line Tools (step 1). No account is needed:
 
 ```bash
-git clone git@github.com:TheHiep0902/macos-system-info.git
-cd macos-system-info
-```
-
-Or over HTTPS with the GitHub CLI signed in (`gh auth login`):
-
-```bash
-gh repo clone TheHiep0902/macos-system-info
+git clone https://github.com/TheHiep0902/macos-system-info.git
 cd macos-system-info
 ```
 
@@ -520,7 +513,7 @@ Outputs, with `<triple>` one of `aarch64-apple-darwin`, `x86_64-apple-darwin`,
 | Artifact | Path                                                                                                     |
 | -------- | -------------------------------------------------------------------------------------------------------- |
 | App      | `src-tauri/target/<triple>/release/bundle/macos/Pulsebar.app`                                            |
-| DMG      | `src-tauri/target/<triple>/release/bundle/dmg/Pulsebar_0.2.0_aarch64.dmg` (`_x64.dmg`, `_universal.dmg`) |
+| DMG      | `src-tauri/target/<triple>/release/bundle/dmg/Pulsebar_0.3.0_aarch64.dmg` (`_x64.dmg`, `_universal.dmg`) |
 
 The two native DMGs (`aarch64`, `x64`) are the main release artifacts; the universal DMG is
 produced as well.
@@ -544,7 +537,7 @@ Inspect a DMG without opening a Finder window, then compute checksums for publis
 
 ```bash
 mkdir -p "$TMPDIR/pulsebar-dmg"
-hdiutil attach -nobrowse -readonly -mountpoint "$TMPDIR/pulsebar-dmg" src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/Pulsebar_0.2.0_aarch64.dmg
+hdiutil attach -nobrowse -readonly -mountpoint "$TMPDIR/pulsebar-dmg" src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/Pulsebar_0.3.0_aarch64.dmg
 /bin/ls -la "$TMPDIR/pulsebar-dmg"
 hdiutil detach "$TMPDIR/pulsebar-dmg"
 shasum -a 256 src-tauri/target/*/release/bundle/dmg/*.dmg
@@ -776,7 +769,7 @@ in the keychain (`notarytool` prompts for the app-specific password), then submi
 
 ```bash
 xcrun notarytool store-credentials pulsebar-notary --apple-id you@example.com --team-id TEAMID
-DMG=src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/Pulsebar_0.2.0_aarch64.dmg
+DMG=src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/Pulsebar_0.3.0_aarch64.dmg
 xcrun notarytool submit "$DMG" --keychain-profile pulsebar-notary --wait && xcrun stapler staple "$DMG"
 ```
 
@@ -790,7 +783,7 @@ Check the result:
 codesign --verify --deep --strict --verbose=2 src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Pulsebar.app
 codesign -dv src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Pulsebar.app
 spctl -a -vv -t exec src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Pulsebar.app
-spctl -a -vv -t open --context context:primary-signature src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/Pulsebar_0.2.0_aarch64.dmg
+spctl -a -vv -t open --context context:primary-signature src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/Pulsebar_0.3.0_aarch64.dmg
 ```
 
 `spctl` rejects an ad-hoc build (measured: `rejected` for the arm64, x86_64 and universal apps); that
@@ -937,7 +930,7 @@ version and both platforms. Then, on a Mac with the previous version installed i
 
 ## Installing and opening an un-notarized build
 
-1. Pick the DMG for your Mac: `Pulsebar_0.2.0_aarch64.dmg` for Apple Silicon, `Pulsebar_0.2.0_x64.dmg`
+1. Pick the DMG for your Mac: `Pulsebar_0.3.0_aarch64.dmg` for Apple Silicon, `Pulsebar_0.3.0_x64.dmg`
    for Intel (releases ship only these two; `pnpm build:universal` builds a universal DMG from
    source). Do not use the x64 DMG on Apple Silicon (Rosetta disables power, frequency and
    temperature).

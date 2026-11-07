@@ -98,9 +98,10 @@ Details and the refusal cases are in docs/verification.md (D9).
 
 ## Releases
 
-| Release | Type             | Assets                                  | Built on                                    |
-| ------- | ---------------- | --------------------------------------- | ------------------------------------------- |
-| v0.1.0  | pre-release      | `aarch64` and `x64` DMGs + `SHA256SUMS` | Intel Hackintosh (dev host), from `f5ccb49` |
-| v0.2.0  | release (latest) | `aarch64` and `x64` DMGs + `SHA256SUMS` | Intel Hackintosh (dev host), from `3c96798` |
+| Release | Type             | Assets                                                                          | Built on                                                            |
+| ------- | ---------------- | ------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| v0.1.0  | pre-release      | `aarch64` and `x64` DMGs + `SHA256SUMS`                                         | Intel Hackintosh (dev host), from `f5ccb49`                         |
+| v0.2.0  | pre-release      | `aarch64` and `x64` DMGs + `SHA256SUMS`                                         | Intel Hackintosh (dev host), from `3c96798`                         |
+| v0.3.0  | release (latest) | `aarch64` and `x64` DMGs, updater packages, `.sig`, `latest.json`, `SHA256SUMS` | Intel Hackintosh (dev host), from the `chore: release 0.3.0` commit |
 
 v0.1.0 and v0.2.0 have no in-app updater. Results per release are in docs/verification.md ("GitHub releases").
